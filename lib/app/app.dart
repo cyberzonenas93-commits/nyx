@@ -6,6 +6,7 @@ import 'theme.dart';
 import '../core/services/permission_service.dart';
 import '../core/services/auth_service.dart';
 import '../core/services/panic_switch_service.dart';
+import '../core/services/wifi_transfer_service.dart';
 import '../features/onboarding/pages/onboarding_page.dart';
 import '../features/unlock/pages/unlock_page.dart';
 import '../features/unlock/pages/unlock_method_selection_page.dart';
@@ -139,6 +140,17 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
   /// Lock the vault if it's currently unlocked
   void _lockVaultIfUnlocked() {
     try {
+      // Don't auto-lock when WiFi Transfer server is running (user may be uploading from computer)
+      if (mounted) {
+        try {
+          final wifiTransfer = Provider.of<WiFiTransferService>(context, listen: false);
+          if (wifiTransfer.isRunning) {
+            debugPrint('[App] WiFi Transfer server running - not auto-locking vault');
+            return;
+          }
+        } catch (_) {}
+      }
+
       // Use cached reference or get from context if available
       final authService = _authService ?? (mounted ? Provider.of<AuthService>(context, listen: false) : null);
       
@@ -209,7 +221,13 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
             case AppState.locked:
               return const UnlockPage();
             case AppState.unlocked:
-              return VaultHomePage(vaultId: authService.currentVaultId);
+              return VaultHomePage(
+                vaultId: authService.currentVaultId,
+                onLockRequested: () async {
+                  await authService.lockVault();
+                  _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+                },
+              );
           }
         },
       ),

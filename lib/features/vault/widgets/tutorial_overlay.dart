@@ -68,19 +68,72 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
   }
   
   Widget _buildOverlay(BuildContext? targetContext) {
-    return GestureDetector(
-      onTap: () {
-        // Allow tapping outside to proceed (optional)
-      },
-      child: CustomPaint(
-        painter: TutorialOverlayPainter(
-          targetContext: targetContext,
-          overlayColor: Colors.black.withOpacity(0.75),
-        ),
+    final screenSize = MediaQuery.of(context).size;
+    const padding = 8.0;
+    Rect? cutout;
+    if (targetContext != null) {
+      final renderObject = targetContext!.findRenderObject();
+      if (renderObject != null && renderObject is RenderBox && renderObject.hasSize) {
+        final position = renderObject.localToGlobal(Offset.zero);
+        final size = renderObject.size;
+        cutout = Rect.fromLTWH(
+          position.dx - padding,
+          position.dy - padding,
+          size.width + padding * 2,
+          size.height + padding * 2,
+        );
+      }
+    }
+
+    final overlayColor = Colors.black.withOpacity(0.75);
+    if (cutout == null) {
+      return GestureDetector(
+        onTap: () {},
         child: Container(
           width: double.infinity,
           height: double.infinity,
+          color: overlayColor,
         ),
+      );
+    }
+
+    // Build four panels around the cutout so the cutout area has no widget and taps pass through (e.g. to the lock button).
+    return Stack(
+      children: [
+        _overlayPanel(0, 0, cutout.left, screenSize.height, overlayColor),
+        _overlayPanel(cutout.left, 0, cutout.width, cutout.top, overlayColor),
+        _overlayPanel(cutout.right, 0, screenSize.width - cutout.right, screenSize.height, overlayColor),
+        _overlayPanel(cutout.left, cutout.bottom, cutout.width, screenSize.height - cutout.bottom, overlayColor),
+        // Highlight border around cutout (IgnorePointer so taps still pass through to target)
+        Positioned(
+          left: cutout.left,
+          top: cutout.top,
+          width: cutout.width,
+          height: cutout.height,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.accent, width: 3),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _overlayPanel(double left, double top, double width, double height, Color color) {
+    if (width <= 0 || height <= 0) return const SizedBox.shrink();
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      height: height,
+      child: GestureDetector(
+        onTap: () {},
+        behavior: HitTestBehavior.opaque,
+        child: ColoredBox(color: color),
       ),
     );
   }

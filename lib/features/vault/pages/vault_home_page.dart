@@ -33,9 +33,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Premium vault home page with grid layout and media-first presentation
 class VaultHomePage extends StatefulWidget {
   final String? vaultId; // If null, uses primary vault
-  
-  const VaultHomePage({super.key, this.vaultId});
-  
+  /// When set, the lock button calls this instead of using context (avoids disposed context after lock).
+  final Future<void> Function()? onLockRequested;
+
+  const VaultHomePage({super.key, this.vaultId, this.onLockRequested});
+
   @override
   State<VaultHomePage> createState() => _VaultHomePageState();
 }
@@ -80,7 +82,6 @@ class _VaultHomePageState extends State<VaultHomePage> {
   final GlobalKey _gridViewKey = GlobalKey();
   final GlobalKey _downloadAllKey = GlobalKey();
   final GlobalKey _browserKey = GlobalKey();
-  final GlobalKey _wifiKey = GlobalKey();
   final GlobalKey _viewToggleKey = GlobalKey();
   final GlobalKey _settingsKey = GlobalKey();
   final GlobalKey _lockKey = GlobalKey();
@@ -603,13 +604,6 @@ class _VaultHomePageState extends State<VaultHomePage> {
         alignment: Alignment.topRight,
       ),
       TutorialStep(
-        id: 'wifi_transfer',
-        title: 'WiFi File Transfer',
-        description: 'Transfer files wirelessly:\n• Share files between your computer and phone\n• Access via web browser\n• Scan QR code for quick access\n• Perfect for large files\n\nBoth devices must be on the same WiFi network.',
-        targetKey: _wifiKey,
-        alignment: Alignment.topRight,
-      ),
-      TutorialStep(
         id: 'view_toggle',
         title: 'Switch Views',
         description: 'Toggle between grid and list views:\n• Grid view: Visual thumbnails\n• List view: Detailed file information\n• Choose what works best for you!',
@@ -668,7 +662,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       TutorialStep(
         id: 'complete',
         title: 'You\'re All Set!',
-        description: 'You now know how to:\n✓ Add files to your vault\n✓ Organize with albums and folders\n✓ View and play media files\n✓ Download files and manage downloads\n✓ Use the browser and WiFi transfer\n✓ Configure settings and security\n✓ Create multiple vaults (Premium)\n✓ Lock your vault for security\n\nYour vault is ready to protect your privacy!',
+        description: 'You now know how to:\n✓ Add files to your vault\n✓ Organize with albums and folders\n✓ View and play media files\n✓ Download files and manage downloads\n✓ Use the browser\n✓ Configure settings and security\n✓ Create multiple vaults (Premium)\n✓ Lock your vault for security\n\nYour vault is ready to protect your privacy!',
         alignment: Alignment.center,
         showNextButton: false,
       ),
@@ -962,6 +956,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
   Future<void> _lockVault() async {
     if (!mounted) return;
     try {
+      if (widget.onLockRequested != null) {
+        await widget.onLockRequested!();
+        return;
+      }
       final authService = Provider.of<AuthService>(context, listen: false);
       final navigator = Navigator.of(context, rootNavigator: true);
       await authService.lockVault();
@@ -1101,7 +1099,6 @@ class _VaultHomePageState extends State<VaultHomePage> {
             selector: (_, service) => service.currentTier.isUnlimited || service.isInTrial,
             builder: (context, hasPremium, _) {
               return IconButton(
-                key: _wifiKey,
                 icon: Icon(
                   Icons.wifi,
                   color: hasPremium ? null : AppTheme.text.withOpacity(0.4),
