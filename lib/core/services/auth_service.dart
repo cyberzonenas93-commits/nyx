@@ -125,28 +125,29 @@ class AuthService extends ChangeNotifier {
   /// Verify PIN for a secondary vault
   /// Uses the same logic as verifyPIN - reads from secure storage directly
   Future<bool> verifySecondaryVaultPIN(String vaultId, String pin) async {
-    // Read PIN hash and salt from secure storage (same pattern as primary vault)
-    final saltHex = await _secureStorage.read(key: 'pin_salt_$vaultId');
-    final hashedPIN = await _secureStorage.read(key: 'pin_hash_$vaultId');
+    final hashKey = 'pin_hash_$vaultId';
+    final saltKey = 'pin_salt_$vaultId';
+    final saltHex = await _secureStorage.read(key: saltKey);
+    final hashedPIN = await _secureStorage.read(key: hashKey);
     
     if (saltHex == null || hashedPIN == null) {
-      debugPrint('[AuthService] Secondary vault PIN not set up for vault: $vaultId');
+      debugPrint('[AuthService] Secondary vault PIN not found for vaultId: $vaultId (keys: $hashKey, $saltKey; saltHex null: ${saltHex == null}, hashedPIN null: ${hashedPIN == null})');
       return false;
     }
     
-    // Check PIN (same logic as primary vault)
+    // Check PIN (same logic as primary vault: verifyPassword uses salt embedded in hashedPIN)
     final salt = _hexToBytes(saltHex);
     final masterKey = await _encryptionService.deriveMasterKey(pin, salt);
     
-    if (await _encryptionService.verifyPassword(pin, hashedPIN)) {
-      // Secondary vault unlocked
+    final verified = await _encryptionService.verifyPassword(pin, hashedPIN);
+    if (verified) {
       _masterKey = masterKey;
       _currentVaultId = vaultId;
       await _unlockVault();
       debugPrint('[AuthService] Secondary vault unlocked: $vaultId');
       return true;
     }
-    
+    debugPrint('[AuthService] Secondary vault PIN verification failed for vaultId: $vaultId');
     return false;
   }
   

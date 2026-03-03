@@ -92,7 +92,7 @@ class MultiVaultService extends ChangeNotifier {
     required String triggerCode,
     required String pinHash,
     required String pinSalt,
-    required FlutterSecureStorage secureStorage, // For storing PIN hash/salt directly
+    FlutterSecureStorage? secureStorage,
   }) async {
     if (_vaults.length >= maxVaults) {
       throw StateError('Maximum number of vaults reached ($maxVaults)');
@@ -104,12 +104,13 @@ class MultiVaultService extends ChangeNotifier {
     }
     
     final vaultId = _uuid.v4();
+    final storage = secureStorage ?? _secureStorage;
+
+    // Store PIN hash and salt in this service's secure storage (same backend AuthService reads)
+    await storage.write(key: 'pin_hash_$vaultId', value: pinHash);
+    await storage.write(key: 'pin_salt_$vaultId', value: pinSalt);
     
-    // Store PIN hash and salt directly in secure storage (same as primary vault)
-    await secureStorage.write(key: 'pin_hash_$vaultId', value: pinHash);
-    await secureStorage.write(key: 'pin_salt_$vaultId', value: pinSalt);
-    
-    debugPrint('[MultiVaultService] Stored secondary vault PIN info in secure storage for vault: $vaultId');
+    debugPrint('[MultiVaultService] Stored secondary vault PIN for vaultId: $vaultId');
     
     final vault = VaultMetadata(
       id: vaultId,
@@ -131,6 +132,18 @@ class MultiVaultService extends ChangeNotifier {
     return vault;
   }
   
+  /// Update PIN for an existing secondary vault (e.g. after reset).
+  /// Uses this service's secure storage so AuthService can read it.
+  Future<void> updateSecondaryVaultPIN(String vaultId, String pinHash, String pinSalt) async {
+    final vault = getVaultById(vaultId);
+    if (vault == null || vault.isPrimary) {
+      throw StateError('Vault not found or cannot update primary vault PIN');
+    }
+    await _secureStorage.write(key: 'pin_hash_$vaultId', value: pinHash);
+    await _secureStorage.write(key: 'pin_salt_$vaultId', value: pinSalt);
+    debugPrint('[MultiVaultService] Updated secondary vault PIN for vaultId: $vaultId');
+  }
+
   /// Get vault by trigger code
   VaultMetadata? getVaultByTriggerCode(String triggerCode) {
     try {

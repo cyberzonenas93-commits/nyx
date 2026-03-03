@@ -321,9 +321,26 @@ class SubscriptionService extends ChangeNotifier {
     debugPrint('GOD MODE: All paywalls bypassed');
   }
   
+  /// Disable God mode - restore normal subscription checks
+  Future<void> disableGodMode() async {
+    _godMode = false;
+    await _secureStorage.delete(key: 'god_mode');
+    notifyListeners();
+    debugPrint('GOD MODE: Disabled');
+  }
+
   /// Check if God mode is active
   bool get isGodMode => _godMode;
-  
+
+  /// Toggle God mode (enable if off, disable if on)
+  Future<void> toggleGodMode() async {
+    if (_godMode) {
+      await disableGodMode();
+    } else {
+      await enableGodMode();
+    }
+  }
+
   /// Restore previous purchases
   Future<void> restorePurchases() async {
     if (!_isAvailable) return;

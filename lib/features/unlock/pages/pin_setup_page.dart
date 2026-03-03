@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import '../../../app/theme.dart';
 import '../../../core/services/auth_service.dart';
@@ -404,9 +403,8 @@ class _PinSetupPageState extends State<PinSetupPage> {
         if (widget.isSecondaryVault && widget.vaultName != null && widget.vaultTriggerCode != null) {
           final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
           final encryptionService = EncryptionService();
-          final secureStorage = const FlutterSecureStorage();
           
-          // Create PIN hash and salt for secondary vault (same as primary vault)
+          // Create PIN hash and salt for secondary vault (same format as primary)
           final salt = encryptionService.generateSalt();
           final pinHash = await encryptionService.hashPassword(_pin, salt);
           
@@ -419,9 +417,8 @@ class _PinSetupPageState extends State<PinSetupPage> {
           
           try {
             if (widget.isResettingPIN && widget.vaultIdToReset != null) {
-              // Update PIN hash and salt in secure storage for the specified vault
-              await secureStorage.write(key: 'pin_hash_${widget.vaultIdToReset}', value: pinHash);
-              await secureStorage.write(key: 'pin_salt_${widget.vaultIdToReset}', value: saltHex);
+              // Update PIN via MultiVaultService so same storage backend is used (AuthService can read it)
+              await multiVaultService.updateSecondaryVaultPIN(widget.vaultIdToReset!, pinHash, saltHex);
               
               debugPrint('[PinSetupPage] Secondary vault PIN reset for vault: ${widget.vaultIdToReset}');
               
@@ -440,13 +437,12 @@ class _PinSetupPageState extends State<PinSetupPage> {
                 Navigator.of(context).pop(true); // Return success
               }
             } else {
-              // Create new secondary vault
+              // Create new secondary vault (service uses its own storage so AuthService can read)
               await multiVaultService.createSecondaryVault(
                 name: widget.vaultName!,
                 triggerCode: widget.vaultTriggerCode!,
                 pinHash: pinHash,
                 pinSalt: saltHex,
-                secureStorage: secureStorage,
               );
               
               if (mounted) {

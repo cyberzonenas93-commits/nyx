@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import '../../../app/theme.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../core/services/subscription_service.dart';
 import '../../../core/services/tutorial_service.dart';
 import '../../../core/services/vault_service.dart';
@@ -11,6 +12,7 @@ import '../../../core/models/subscription_tier.dart';
 import '../../../core/services/redirect_blocker_service.dart';
 import '../../../features/subscription/pages/paywall_page.dart';
 import '../../../features/vault/pages/vault_home_page.dart';
+import '../../../shared/widgets/pin_verification_dialog.dart';
 import '../../../shared/widgets/secure_button.dart';
 import 'security_page.dart';
 import 'privacy_policy_page.dart';
@@ -100,16 +102,11 @@ class SettingsPage extends StatelessWidget {
           
           const SizedBox(height: 24),
           
-          // About Section
+          // About Section (App Version: tap 7 times to toggle God mode)
           _buildSection(
             title: 'About',
             children: [
-              _SettingsTile(
-                icon: Icons.info_outline,
-                title: 'App Version',
-                subtitle: '1.0.0',
-                onTap: null,
-              ),
+              _SecretVersionTile(),
               _SettingsTile(
                 icon: Icons.shield_outlined,
                 title: 'Privacy Policy',
@@ -156,6 +153,74 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Hidden: tap 7 times to toggle God mode (full access without subscription).
+class _SecretVersionTile extends StatefulWidget {
+  @override
+  State<_SecretVersionTile> createState() => _SecretVersionTileState();
+}
+
+class _SecretVersionTileState extends State<_SecretVersionTile> {
+  int _tapCount = 0;
+  DateTime? _lastTapAt;
+  static const _tapWindow = Duration(seconds: 2);
+  static const _tapsRequired = 7;
+
+  Future<void> _onTap() async {
+    final now = DateTime.now();
+    if (_lastTapAt != null && now.difference(_lastTapAt!) > _tapWindow) {
+      _tapCount = 0;
+    }
+    _tapCount++;
+    _lastTapAt = now;
+    if (_tapCount < _tapsRequired) return;
+    _tapCount = 0;
+    _lastTapAt = null;
+
+    if (!mounted) return;
+    final verifiedPIN = await PinVerificationDialog.show(context);
+    if (verifiedPIN == null || verifiedPIN.isEmpty || !mounted) return;
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final result = await authService.verifyPIN(verifiedPIN);
+    if (!mounted) return;
+
+    if (result == AuthResult.unlocked) {
+      final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+      await subscriptionService.toggleGodMode();
+      if (!mounted) return;
+      final isOn = subscriptionService.isGodMode;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isOn ? 'God mode on – full access' : 'God mode off'),
+          backgroundColor: isOn ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Incorrect PIN'),
+          backgroundColor: AppTheme.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsTile(
+      icon: Icons.info_outline,
+      title: 'App Version',
+      subtitle: '1.0.0',
+      onTap: _onTap,
     );
   }
 }
@@ -207,13 +272,35 @@ class _SubscriptionSection extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                currentTier.displayName,
-                                style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.text,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    currentTier.displayName,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.text,
+                                    ),
+                                  ),
+                                  if (subscriptionService.isGodMode) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.accent.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        'God mode',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.accent,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                               const SizedBox(height: 4),
                               Text(

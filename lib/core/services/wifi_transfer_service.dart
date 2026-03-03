@@ -111,8 +111,13 @@ class WiFiTransferService extends ChangeNotifier {
       return null;
     }
 
-    final boundary = headerValue.parameters['boundary'];
+    var boundary = headerValue.parameters['boundary']?.trim();
     if (boundary == null || boundary.isEmpty) return null;
+    // Some browsers send boundary in quotes
+    if ((boundary.startsWith('"') && boundary.endsWith('"')) ||
+        (boundary.startsWith("'") && boundary.endsWith("'"))) {
+      boundary = boundary.substring(1, boundary.length - 1);
+    }
 
     final transformer = MimeMultipartTransformer(boundary);
     await for (final part in request.read().transform(transformer)) {
@@ -303,18 +308,30 @@ class WiFiTransferService extends ChangeNotifier {
   }
 
   Map<String, String> _corsHeadersForRequest(Request request) {
-    // This server serves its own web UI from the same origin, so CORS isn't required.
-    // We only reflect the Origin for same-origin requests (defense in depth).
+    // Reflect Origin for same-host requests so CORS doesn't block (e.g. trailing slash differences).
     final origin = request.headers['origin'];
     final url = _serverUrl;
     final headers = <String, String>{
       'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Vary': 'Origin',
     };
 
-    if (origin != null && url != null && origin == url) {
-      headers['Access-Control-Allow-Origin'] = origin;
+    if (origin != null && origin.isNotEmpty && url != null) {
+      final o = origin.trim().replaceFirst(RegExp(r'/$'), '');
+      final u = url.replaceFirst(RegExp(r'/$'), '');
+      if (o == u) {
+        headers['Access-Control-Allow-Origin'] = origin;
+      } else {
+        // Same host:port (e.g. different path/scheme) — allow so browser doesn't block
+        try {
+          final originUri = Uri.parse(origin);
+          final serverUri = Uri.parse(url);
+          if (originUri.host == serverUri.host && originUri.port == serverUri.port) {
+            headers['Access-Control-Allow-Origin'] = origin;
+          }
+        } catch (_) {}
+      }
     }
     return headers;
   }
@@ -343,9 +360,13 @@ class WiFiTransferService extends ChangeNotifier {
           return Response.forbidden('Server not ready');
         }
 
-        // Require token for ALL routes (including index).
-        final provided = request.url.queryParameters['token'];
-        if (provided != token) {
+        // Require token for ALL routes: query param (from QR/link) or Authorization header.
+        final fromQuery = request.url.queryParameters['token'];
+        final authHeader = request.headers['authorization'];
+        final fromHeader = authHeader != null &&
+            authHeader.startsWith('Bearer ') &&
+            authHeader.substring(7).trim() == token;
+        if (fromQuery != token && !fromHeader) {
           return Response.forbidden(
             'Unauthorized. Open the tokenized URL from the app (QR code) to authenticate.',
           );
@@ -1164,6 +1185,11 @@ class WiFiTransferService extends ChangeNotifier {
         async function loadFiles() {
             try {
                 const response = await fetch(apiUrl('/api/items'));
+                if (response.status === 403) {
+                    const text = await response.text();
+                    fileList.innerHTML = '<p style="color: #FF9800;">Unlock the vault in the Nyx app, then refresh this page.</p>';
+                    return;
+                }
                 const data = await response.json();
                 
                 if (data.items && data.items.length > 0) {
@@ -1185,13 +1211,18 @@ class WiFiTransferService extends ChangeNotifier {
                     fileList.innerHTML = '<p style="color: #888; text-align: center;">No files in vault</p>';
                 }
             } catch (error) {
-                fileList.innerHTML = '<p style="color: #FF4444;">Error loading files</p>';
+                fileList.innerHTML = '<p style="color: #FF4444;">Error loading files. Check connection and token.</p>';
             }
         }
         
         async function downloadFile(itemId, filename) {
             try {
                 const response = await fetch(apiUrl(\`/api/download/\${itemId}\`));
+                if (!response.ok) {
+                    const text = await response.text();
+                    alert('Download failed: ' + (text || response.status + ' ' + response.statusText));
+                    return;
+                }
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -1208,6 +1239,10 @@ class WiFiTransferService extends ChangeNotifier {
         async function loadFolders() {
             try {
                 const response = await fetch(apiUrl('/api/folders'));
+                if (response.status === 403) {
+                    folderList.innerHTML = '<p style="color: #FF9800;">Unlock the vault in the Nyx app, then refresh this page.</p>';
+                    return;
+                }
                 const data = await response.json();
 
                 if (data.folders && data.folders.length > 0) {
@@ -1226,13 +1261,18 @@ class WiFiTransferService extends ChangeNotifier {
                     folderList.innerHTML = '<p style="color: #888; text-align: center;">No folders</p>';
                 }
             } catch (error) {
-                folderList.innerHTML = '<p style="color: #FF4444;">Error loading folders</p>';
+                folderList.innerHTML = '<p style="color: #FF4444;">Error loading folders. Check connection and token.</p>';
             }
         }
 
         async function downloadFolder(folderId, folderName) {
             try {
                 const response = await fetch(apiUrl(\`/api/download-folder/\${folderId}\`));
+                if (!response.ok) {
+                    const text = await response.text();
+                    alert('Folder download failed: ' + (text || response.status + ' ' + response.statusText));
+                    return;
+                }
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
