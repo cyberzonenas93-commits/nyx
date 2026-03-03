@@ -40,6 +40,10 @@
 	<string>This app needs access to your photo library to import media into the secure vault.</string>
 		<key>NSLocalNetworkUsageDescription</key>
 		<string>WiFi Transfer needs local network access so your computer can connect to this device to send and receive files over the same WiFi.</string>
+		<key>NSBonjourServices</key>
+		<array>
+			<string>_http._tcp</string>
+		</array>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
 		<key>UIFileSharingEnabled</key>

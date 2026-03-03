@@ -1127,12 +1127,11 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         return;
       }
 
-      // For photos and videos on iOS, save to Photos library
-      // For audio and other files, save to Files app (no permission needed)
-      if (Platform.isIOS && (widget.item.type == VaultItemType.photo || widget.item.type == VaultItemType.video)) {
+      // For photos and videos, save to device gallery (Photos app)
+      // For other files (audio, documents, etc.), save to Downloads/Files
+      if (widget.item.type == VaultItemType.photo || widget.item.type == VaultItemType.video) {
         await _saveToPhotosLibrary(fileData);
       } else {
-        // For other files (audio, documents, etc.) or Android, save to Downloads/Files
         await _saveToFiles(fileData);
       }
     } catch (e) {
@@ -1149,14 +1148,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   }
 
   Future<void> _saveToPhotosLibrary(Uint8List fileData) async {
-    // Only for iOS - photos and videos should save to photo library
-    if (!Platform.isIOS) {
-      // Android: use Files/Downloads
-      await _saveToFiles(fileData);
-      return;
-    }
-    
-    // Check photo library add permission (photosAddOnly for iOS)
+    // Save to device gallery on both iOS and Android
+    // Check photo library add permission (photosAddOnly on iOS; plugin may handle Android)
     // Try to request permission silently, but don't block or show errors
     // We'll check the actual save result instead
     var status = await Permission.photosAddOnly.status;

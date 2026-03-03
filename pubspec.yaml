@@ -48,13 +48,20 @@ dependencies:
   uuid: ^4.3.3
   collection: ^1.18.0
   
-  # WiFi Transfer
+  # WiFi Transfer (minimal)
   shelf: ^1.4.2
-  shelf_static: ^1.1.2
-  qr_flutter: ^4.1.0
+  shelf_router: ^1.1.4
   network_info_plus: ^7.0.0
-  archive: ^3.4.0
-  
+  mime: ^1.0.6
+  archive: ^4.0.0
+  qr_flutter: ^4.1.0
+  mdns_dart: ^2.2.1
+  device_info_plus: ^12.1.0
+  # Native mDNS on iOS/Android for reliable discovery on real devices
+  mdns_responder:
+    git:
+      url: https://github.com/eelco2k/mdns_responder.git
+
   # In-App Purchases
   in_app_purchase: ^3.1.11
   
@@ -69,10 +76,7 @@ dependencies:
   
   # Cryptography
   argon2: ^1.0.1
-  shelf_router: ^1.1.4
   wechat_assets_picker: ^10.1.0
-  http_parser: ^4.1.2
-  mime: ^1.0.6
   # Note: CRYSTALS-Kyber doesn't have a Dart package yet, will use FFI
 
 dev_dependencies:

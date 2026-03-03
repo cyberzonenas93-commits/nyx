@@ -1,4 +1,5 @@
-import 'dart:async';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,7 +7,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../../app/theme.dart';
 import '../../../core/services/wifi_transfer_service.dart';
 
-/// WiFi Transfer Page - Enables file transfer between app and computer
+/// WiFi Transfer: start a local server so a computer on the same WiFi
+/// can open the URL to upload/download vault files.
 class WiFiTransferPage extends StatefulWidget {
   const WiFiTransferPage({super.key});
 
@@ -15,503 +17,286 @@ class WiFiTransferPage extends StatefulWidget {
 }
 
 class _WiFiTransferPageState extends State<WiFiTransferPage> {
-  StreamSubscription<TransferEvent>? _transferEventSubscription;
+  bool? _isPhysicalDevice;
 
   @override
   void initState() {
     super.initState();
-    _setupTransferListener();
+    _loadIsPhysicalDevice();
   }
 
-  @override
-  void dispose() {
-    _transferEventSubscription?.cancel();
-    super.dispose();
-  }
-
-  void _setupTransferListener() {
-    final transferService = Provider.of<WiFiTransferService>(context, listen: false);
-    _transferEventSubscription = transferService.transferEvents.listen((event) {
-      if (!mounted) return;
-      
-      final isUpload = event.type == TransferEventType.upload;
-      final action = isUpload ? 'Received' : 'Sent';
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: event.success 
-                      ? Colors.white.withOpacity(0.2) 
-                      : Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  event.success
-                      ? (isUpload ? Icons.file_download : Icons.file_upload)
-                      : Icons.error_outline,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      event.success ? action : 'Error',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      event.success 
-                          ? '${event.filename}\n${_formatBytes(event.sizeBytes)}'
-                          : (event.error ?? 'Unknown error'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withOpacity(0.9),
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: event.success ? AppTheme.accent : AppTheme.warning,
-          duration: Duration(seconds: event.success ? 4 : 5),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.radius),
-          ),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
-    });
+  Future<void> _loadIsPhysicalDevice() async {
+    final deviceInfo = DeviceInfoPlugin();
+    bool? physical;
+    if (Platform.isAndroid) {
+      final android = await deviceInfo.androidInfo;
+      physical = android.isPhysicalDevice;
+    } else if (Platform.isIOS) {
+      final ios = await deviceInfo.iosInfo;
+      physical = ios.isPhysicalDevice;
+    }
+    if (mounted) setState(() => _isPhysicalDevice = physical);
   }
 
   @override
   Widget build(BuildContext context) {
-    final transferService = Provider.of<WiFiTransferService>(context);
-    final urlToOpen = transferService.serverUrlWithToken ?? transferService.serverUrl;
-
     return Scaffold(
       backgroundColor: AppTheme.primary,
       appBar: AppBar(
         title: const Text('WiFi Transfer'),
         backgroundColor: AppTheme.surface,
-        elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Status Card
-            Card(
-              color: AppTheme.surface,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    Icon(
-                      transferService.isRunning
-                          ? Icons.wifi
-                          : Icons.wifi_off,
-                      size: 48,
-                      color: transferService.isRunning
-                          ? AppTheme.accent
-                          : AppTheme.text.withOpacity(0.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      transferService.isRunning
-                          ? 'Server Running'
-                          : 'Server Stopped',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.text,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (transferService.isRunning && urlToOpen != null)
-                      Text(
-                        transferService.serverUrl!,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: AppTheme.accent,
-                          fontWeight: FontWeight.w500,
+      body: SafeArea(
+        child: Consumer<WiFiTransferService>(
+          builder: (context, service, _) {
+            return Column(
+              children: [
+                if (service.isReceiving)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    color: AppTheme.accent.withValues(alpha: 0.2),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.accent),
                         ),
-                        textAlign: TextAlign.center,
-                      )
-                    else if (!transferService.isRunning)
-                      Text(
-                        'Start the server to enable file transfer',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppTheme.text.withOpacity(0.7),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    if (transferService.isRunning && transferService.serverUrl != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        'Phone and computer must be on the same WiFi.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.text.withOpacity(0.6),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      if (!transferService.isUrlReachableFromComputer) ...[
-                        const SizedBox(height: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.warning.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            'This device may not be on WiFi. Connect to WiFi and tap Stop then Start to get a reachable address.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.warning,
-                            ),
-                            textAlign: TextAlign.center,
+                        const SizedBox(width: 12),
+                        Text(
+                          'Receiving files…',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.accent,
                           ),
                         ),
                       ],
-                    ],
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Control Button
-            ElevatedButton.icon(
-              onPressed: transferService.isRunning
-                  ? () => _stopServer(transferService)
-                  : () => _startServer(transferService),
-              icon: Icon(
-                transferService.isRunning ? Icons.stop : Icons.play_arrow,
-              ),
-              label: Text(
-                transferService.isRunning ? 'Stop Server' : 'Start Server',
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: transferService.isRunning
-                    ? AppTheme.warning
-                    : AppTheme.accent,
-                foregroundColor: AppTheme.primary,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
-
-            if (transferService.isRunning && urlToOpen != null) ...[
-              const SizedBox(height: 30),
-
-              // QR Code Card
-              Card(
-                color: AppTheme.surface,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
+                    ),
+                  ),
+                if (service.showUploadComplete && !service.isReceiving)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    color: AppTheme.accent.withValues(alpha: 0.15),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: AppTheme.accent, size: 24),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Upload complete',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.accent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.all(24),
                     children: [
-                      const Text(
-                        'Scan QR Code to Open',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.text,
+                      const SizedBox(height: 16),
+                      Icon(
+                  service.isRunning ? Icons.wifi : Icons.wifi_off,
+                  size: 64,
+                  color: service.isRunning ? AppTheme.accent : AppTheme.text.withOpacity(0.4),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  service.isRunning ? 'Server running' : 'Server stopped',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.text,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Use the same WiFi on your phone and computer. Open the URL below in your computer\'s browser to upload or download files.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppTheme.text.withOpacity(0.7),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                if (service.isRunning && service.serverUrl != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                    ),
+                    child: SelectableText(
+                      service.serverUrl!,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: AppTheme.accent,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: service.serverUrl ?? ''));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('URL copied')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copy URL'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.accent,
+                          foregroundColor: AppTheme.primary,
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      Container(
-                        padding: const EdgeInsets.all(16),
+                    ],
+                  ),
+                  // Only hide on real devices: show when 10.0.2.x and not known to be physical
+                  if (service.isLikelyEmulator && _isPhysicalDevice != true) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.warning.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(AppTheme.radius),
+                        border: Border.all(color: AppTheme.warning.withValues(alpha: 0.5)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Android emulator',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.warning,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'On your computer, run in a terminal:',
+                            style: TextStyle(fontSize: 12, color: AppTheme.text),
+                          ),
+                          const SizedBox(height: 4),
+                          SelectableText(
+                            'adb reverse tcp:${service.port} tcp:${service.port}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              color: AppTheme.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Then open in your browser:',
+                            style: TextStyle(fontSize: 12, color: AppTheme.text),
+                          ),
+                          const SizedBox(height: 4),
+                          SelectableText(
+                            'http://127.0.0.1:${service.port}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              color: AppTheme.accent,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (service.isDiscoverableOnNetwork) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Discoverable as "Nyx" on the network. Open Nyx.local in a browser or look in Network/Devices.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.accent.withValues(alpha: 0.9),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                  if (service.isReachableFromNetwork) ...[
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Or scan to open on computer',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.text,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: QrImageView(
-                          data: urlToOpen,
+                          data: service.serverUrl ?? '',
                           version: QrVersions.auto,
-                          size: 200,
+                          size: 180,
                           backgroundColor: Colors.white,
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      Text(
-                        'Or open in browser on your computer:',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppTheme.text.withOpacity(0.7),
-                        ),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Connect to WiFi and restart the server to get a reachable address.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.warning.withOpacity(0.9),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'If the site doesn\'t load: same WiFi, and allow Local Network for Nyx in Settings > Privacy.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.text.withOpacity(0.5),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: SelectableText(
-                              urlToOpen,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: AppTheme.accent,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                  const SizedBox(height: 32),
+                ],
+                FilledButton.icon(
+                  onPressed: () async {
+                    if (service.isRunning) {
+                      await service.stopServer();
+                    } else {
+                      final ok = await service.startServer();
+                      if (context.mounted && !ok) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Could not start server. Check WiFi and try again.'),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.copy, size: 20),
-                            onPressed: () {
-                              Clipboard.setData(
-                                ClipboardData(text: urlToOpen),
-                              );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('URL copied to clipboard!'),
-                                  duration: Duration(seconds: 2),
-                                  backgroundColor: AppTheme.accent,
-                                ),
-                              );
-                            },
-                            tooltip: 'Copy URL',
-                            color: AppTheme.accent,
-                          ),
-                        ],
-                      ),
+                        );
+                      }
+                    }
+                  },
+                  icon: Icon(service.isRunning ? Icons.stop : Icons.play_arrow),
+                  label: Text(service.isRunning ? 'Stop server' : 'Start server'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: service.isRunning ? AppTheme.warning : AppTheme.accent,
+                    foregroundColor: AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                ),
                     ],
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Instructions Card
-              Card(
-                color: AppTheme.surface,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.info_outline,
-                            color: AppTheme.accent,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Instructions',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.text,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _buildInstruction(
-                        '1',
-                        'Make sure your phone and computer are on the same WiFi network',
-                      ),
-                      const SizedBox(height: 12),
-                      _buildInstruction(
-                        '2',
-                        'On your computer, open any web browser (Chrome, Safari, Firefox, Edge, etc.)',
-                      ),
-                      const SizedBox(height: 12),
-                      _buildInstruction(
-                        '3',
-                        'Type the URL shown above into your browser\'s address bar and press Enter. Or scan the QR code with your computer\'s camera',
-                      ),
-                      const SizedBox(height: 12),
-                      _buildInstruction(
-                        '4',
-                        'You\'ll see a web page where you can:\n• Drag & drop files to upload to your vault\n• Download files from your vault to your computer\n• Delete files from your vault',
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // Statistics Card
-              Card(
-                color: AppTheme.surface,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Transfer Statistics',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.text,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildStatRow(
-                        'Files Uploaded',
-                        transferService.uploadedFiles.toString(),
-                      ),
-                      const SizedBox(height: 8),
-                      _buildStatRow(
-                        'Files Downloaded',
-                        transferService.downloadedFiles.toString(),
-                      ),
-                      const SizedBox(height: 8),
-                      _buildStatRow(
-                        'Uploaded Size',
-                        _formatBytes(transferService.totalUploadedBytes),
-                      ),
-                      const SizedBox(height: 8),
-                      _buildStatRow(
-                        'Downloaded Size',
-                        _formatBytes(transferService.totalDownloadedBytes),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
   }
-
-  Widget _buildInstruction(String number, String text) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: AppTheme.accent,
-            shape: BoxShape.circle,
-          ),
-          child: Center(
-            child: Text(
-              number,
-              style: TextStyle(
-                color: AppTheme.primary,
-                fontWeight: FontWeight.w600,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              color: AppTheme.text.withOpacity(0.9),
-              fontSize: 14,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStatRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: AppTheme.text.withOpacity(0.7),
-            fontSize: 14,
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            color: AppTheme.accent,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes == 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    final i = (bytes / k).floor().toString().length - 1;
-    final sizeIndex = i.clamp(0, sizes.length - 1);
-    return '${(bytes / (k * sizeIndex)).toStringAsFixed(2)} ${sizes[sizeIndex]}';
-  }
-
-  Future<void> _startServer(WiFiTransferService service) async {
-    final success = await service.startServer();
-    if (!success && mounted) {
-      final error = service.lastStartError;
-      final message = error != null && error.isNotEmpty
-          ? 'Failed to start server: $error. Use same WiFi and, on iOS, allow Local Network when prompted.'
-          : 'Failed to start server. Connect to WiFi and try again. On iOS, allow Local Network when prompted.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: AppTheme.warning,
-          duration: const Duration(seconds: 6),
-          action: SnackBarAction(
-            label: 'OK',
-            textColor: AppTheme.primary,
-            onPressed: () {},
-          ),
-        ),
-      );
-    }
-  }
-
-  Future<void> _stopServer(WiFiTransferService service) async {
-    await service.stopServer();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Server stopped'),
-          backgroundColor: AppTheme.accent,
-        ),
-      );
-    }
-  }
 }
+
