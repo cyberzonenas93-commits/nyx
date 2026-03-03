@@ -87,6 +87,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
   
   bool _showTutorial = false;
   int _tutorialStep = 0;
+
+  // God mode: 7 rapid taps on vault title then enter code 17031995
+  int _vaultTitleTapCount = 0;
+  DateTime? _vaultTitleLastTapAt;
+  static const _vaultTitleTapWindow = Duration(seconds: 2);
+  static const _vaultTitleTapsRequired = 7;
+  static const _godModeCode = '17031995';
   
   @override
   void initState() {
@@ -823,6 +830,106 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     });
   }
+
+  void _onVaultTitleTap() {
+    if (_isSelectionMode) return;
+    final now = DateTime.now();
+    if (_vaultTitleLastTapAt != null &&
+        now.difference(_vaultTitleLastTapAt!) > _vaultTitleTapWindow) {
+      _vaultTitleTapCount = 0;
+    }
+    _vaultTitleTapCount++;
+    _vaultTitleLastTapAt = now;
+    if (_vaultTitleTapCount >= _vaultTitleTapsRequired) {
+      _vaultTitleTapCount = 0;
+      _vaultTitleLastTapAt = null;
+      _showGodModeCodeDialog();
+    }
+  }
+
+  Future<void> _showGodModeCodeDialog() async {
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    final code = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppTheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
+          ),
+          title: Text(
+            'Enter code',
+            style: TextStyle(color: AppTheme.text),
+          ),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 8,
+              autofocus: true,
+              style: TextStyle(color: AppTheme.text, fontSize: 18),
+              decoration: InputDecoration(
+                hintText: '••••••••',
+                hintStyle: TextStyle(color: AppTheme.text.withOpacity(0.4)),
+                counterText: '',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                ),
+              ),
+              onFieldSubmitted: (value) {
+                if (value == _godModeCode) {
+                  Navigator.of(context).pop(value);
+                }
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: AppTheme.text.withOpacity(0.7)),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value == _godModeCode) {
+                  Navigator.of(context).pop(value);
+                } else {
+                  Navigator.of(context).pop();
+                }
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.accent,
+                foregroundColor: AppTheme.primary,
+              ),
+              child: const Text('Submit'),
+            ),
+          ],
+        );
+      },
+    );
+    if (code == _godModeCode && mounted) {
+      final subscriptionService =
+          Provider.of<SubscriptionService>(context, listen: false);
+      await subscriptionService.enableGodMode();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('God mode activated – full access'),
+            backgroundColor: AppTheme.accent,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
   
   void _toggleItemSelection(String itemId) {
     // Defer setState to avoid calling during build phase
@@ -853,10 +960,20 @@ class _VaultHomePageState extends State<VaultHomePage> {
   }
   
   Future<void> _lockVault() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    await authService.lockVault();
-    if (mounted) {
-      Navigator.of(context).popUntil((route) => route.isFirst);
+    if (!mounted) return;
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final navigator = Navigator.of(context, rootNavigator: true);
+      await authService.lockVault();
+      if (!mounted) return;
+      navigator.popUntil((route) => route.isFirst);
+    } catch (e, stack) {
+      debugPrint('[VaultHomePage] _lockVault error: $e\n$stack');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not lock: $e')),
+        );
+      }
     }
   }
   
@@ -893,9 +1010,16 @@ class _VaultHomePageState extends State<VaultHomePage> {
     return Scaffold(
       backgroundColor: AppTheme.primary,
       appBar: AppBar(
-        title: Text(_isSelectionMode 
-            ? '${_selectedItemIds.length} selected'
-            : 'Vault'),
+        title: _isSelectionMode
+            ? Text('${_selectedItemIds.length} selected')
+            : GestureDetector(
+                onTap: _onVaultTitleTap,
+                behavior: HitTestBehavior.opaque,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('Vault'),
+                ),
+              ),
         backgroundColor: AppTheme.surface,
         elevation: 0,
         leading: _isSelectionMode

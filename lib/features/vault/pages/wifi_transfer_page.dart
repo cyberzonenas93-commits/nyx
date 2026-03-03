@@ -484,10 +484,20 @@ class _WiFiTransferPageState extends State<WiFiTransferPage> {
   Future<void> _startServer(WiFiTransferService service) async {
     final success = await service.startServer();
     if (!success && mounted) {
+      final error = service.lastStartError;
+      final message = error != null && error.isNotEmpty
+          ? 'Failed to start server: $error. Use same WiFi and, on iOS, allow Local Network when prompted.'
+          : 'Failed to start server. Connect to WiFi and try again. On iOS, allow Local Network when prompted.';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to start server. Make sure you\'re connected to WiFi.'),
+        SnackBar(
+          content: Text(message),
           backgroundColor: AppTheme.warning,
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: AppTheme.primary,
+            onPressed: () {},
+          ),
         ),
       );
     }

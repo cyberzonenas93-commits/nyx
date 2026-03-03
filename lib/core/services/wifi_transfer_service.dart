@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
+import 'package:network_info_plus/network_info_plus.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
@@ -66,6 +67,9 @@ class WiFiTransferService extends ChangeNotifier {
   Future<void> _uploadSerial = Future.value();
   
   bool get isRunning => _isRunning;
+  /// Last error from startServer() when it failed (cleared on next start attempt).
+  String? get lastStartError => _lastStartError;
+  String? _lastStartError;
   String? get serverUrl => _serverUrl;
   /// URL that includes the access token, intended for the QR code / browser entry.
   /// Opening this URL makes the web UI automatically authenticate subsequent API calls.
@@ -178,17 +182,21 @@ class WiFiTransferService extends ChangeNotifier {
   Future<bool> startServer() async {
     if (_isRunning) {
       debugPrint('[WiFiTransfer] Server already running');
+      _lastStartError = null;
       return true;
     }
+
+    _lastStartError = null;
     
     try {
-      // Generate access token for security
       _accessToken = const Uuid().v4();
-      
-      // Create router
+      // Get IP before binding so we can listen on the WiFi interface (helps on iOS/Android).
+      final ip = await _getLocalIP();
+      final bindAddress = (ip == 'localhost' || ip == '127.0.0.1')
+          ? InternetAddress.anyIPv4
+          : InternetAddress(ip);
+
       final router = Router();
-      
-      // Serve web interface
       router.get('/', _handleIndex);
       router.get('/api/status', _handleStatus);
       router.get('/api/items', _handleGetItems);
@@ -199,21 +207,20 @@ class WiFiTransferService extends ChangeNotifier {
       router.get('/api/download-folder/<folderId>', _handleDownloadFolder);
       router.delete('/api/delete/<itemId>', _handleDelete);
       
-      // Create middleware for CORS and logging
       final handler = Pipeline()
           .addMiddleware(_logRequests())
           .addMiddleware(_corsMiddleware())
           .addMiddleware(_authMiddleware())
           .addHandler(router);
       
-      // Start server
-      _server = await shelf_io.serve(
-        handler,
-        InternetAddress.anyIPv4,
-        _port,
-      );
+      try {
+        _server = await shelf_io.serve(handler, bindAddress, _port);
+      } catch (bindError) {
+        debugPrint('[WiFiTransfer] Bind to $bindAddress failed: $bindError, trying anyIPv4');
+        _server = await shelf_io.serve(handler, InternetAddress.anyIPv4, _port);
+      }
       
-      _serverUrl = 'http://${await _getLocalIP()}:$_port';
+      _serverUrl = 'http://$ip:$_port';
       _isRunning = true;
       
       debugPrint('[WiFiTransfer] Server started at $_serverUrl');
@@ -221,13 +228,16 @@ class WiFiTransferService extends ChangeNotifier {
       
       notifyListeners();
       return true;
-    } catch (e) {
+    } catch (e, stack) {
       debugPrint('[WiFiTransfer] Error starting server: $e');
+      debugPrint('[WiFiTransfer] $stack');
+      _lastStartError = e.toString();
       // Try next port if current one is in use
       if (_port < 8090) {
         _port++;
         return startServer();
       }
+      notifyListeners();
       return false;
     }
   }
@@ -257,32 +267,45 @@ class WiFiTransferService extends ChangeNotifier {
   /// Get local IP address. Prefers WiFi (en0) so the URL is reachable from a computer on the same WiFi.
   /// Returns 'localhost' only if no suitable address is found (e.g. not on WiFi).
   Future<String> _getLocalIP() async {
+    // 1) Try dart:io NetworkInterface (works well on desktop / some Android)
     try {
       final interfaces = await NetworkInterface.list();
       String? wifiIp;
       String? fallbackIp;
       for (final interface in interfaces) {
         final name = interface.name.toLowerCase();
-        // Skip cellular and other non-LAN interfaces so computer on WiFi can reach us
         if (name.startsWith('pdp_') || name == 'awdl0' || name.startsWith('utun')) continue;
         for (final addr in interface.addresses) {
           if (addr.type != InternetAddressType.IPv4 || addr.isLoopback) continue;
           final ip = addr.address;
           if (name == 'en0') {
             wifiIp ??= ip;
-            break; // use first en0 address
+            break;
           }
-          fallbackIp ??= ip; // use first non-en0 LAN address as fallback
+          fallbackIp ??= ip;
         }
       }
       final chosen = wifiIp ?? fallbackIp;
-      if (chosen != null) {
+      if (chosen != null && chosen != '127.0.0.1') {
         debugPrint('[WiFiTransfer] Using IP: $chosen (WiFi: ${wifiIp != null})');
         return chosen;
       }
     } catch (e) {
-      debugPrint('[WiFiTransfer] Error getting IP: $e');
+      debugPrint('[WiFiTransfer] NetworkInterface error: $e');
     }
+
+    // 2) Fallback: network_info_plus (often works on iOS/Android when dart:io returns nothing)
+    try {
+      final info = NetworkInfo();
+      final wifiIP = await info.getWifiIP();
+      if (wifiIP != null && wifiIP.isNotEmpty && wifiIP != '127.0.0.1') {
+        debugPrint('[WiFiTransfer] Using WiFi IP from network_info_plus: $wifiIP');
+        return wifiIP;
+      }
+    } catch (e) {
+      debugPrint('[WiFiTransfer] network_info_plus error: $e');
+    }
+
     debugPrint('[WiFiTransfer] No WiFi/LAN IP found, using localhost (site may be unreachable from computer)');
     return 'localhost';
   }
@@ -349,18 +372,21 @@ class WiFiTransferService extends ChangeNotifier {
   Middleware _authMiddleware() {
     return (Handler handler) {
       return (Request request) async {
-        // Allow preflight to be handled by CORS middleware.
         if (request.method.toUpperCase() == 'OPTIONS') {
           return handler(request);
         }
 
-        // If server isn't running or token isn't initialized, deny (shouldn't happen).
+        // Allow GET / (index page) without auth so the page always loads; JS reads token from URL for API calls.
+        final path = request.url.path;
+        if (request.method.toUpperCase() == 'GET' && (path.isEmpty || path == '/')) {
+          return handler(request);
+        }
+
         final token = _accessToken;
         if (token == null || token.isEmpty) {
           return Response.forbidden('Server not ready');
         }
 
-        // Require token for ALL routes: query param (from QR/link) or Authorization header.
         final fromQuery = request.url.queryParameters['token'];
         final authHeader = request.headers['authorization'];
         final fromHeader = authHeader != null &&
@@ -975,7 +1001,6 @@ class WiFiTransferService extends ChangeNotifier {
                 <button onclick="document.getElementById('folderInput').click()">📁 Upload Folder</button>
             </div>
             <input type="file" id="folderInput" webkitdirectory directory multiple style="display: none;">
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
             <div id="uploadProgress"></div>
         </div>
         
@@ -1003,7 +1028,9 @@ class WiFiTransferService extends ChangeNotifier {
             return path + sep + 'token=' + encodeURIComponent(TOKEN);
         }
         if (!TOKEN) {
-            alert('Unauthorized. Please open this page using the QR code / URL shown in the Nyx app.');
+            document.getElementById('fileList').innerHTML = '<p style="color:#888;">Open this page using the URL or QR code from the Nyx app to connect.</p>';
+            document.getElementById('folderList').innerHTML = '<p style="color:#888;">Open this page using the URL or QR code from the Nyx app to connect.</p>';
+            document.getElementById('stats').innerHTML = '<p style="color:#888;">Open this page using the URL or QR code from the Nyx app to connect.</p>';
         }
 
         const uploadArea = document.getElementById('uploadArea');
@@ -1049,9 +1076,13 @@ class WiFiTransferService extends ChangeNotifier {
         
         async function handleFolder(files) {
             if (files.length === 0) return;
-            
-            // Create zip file from folder
-            const JSZip = window.JSZip || await loadJSZip();
+            let JSZip;
+            try {
+                JSZip = window.JSZip || await loadJSZip();
+            } catch (e) {
+                alert('Folder upload requires internet to load a script. Try uploading files instead.');
+                return;
+            }
             const zip = new JSZip();
             
             // Add all files to zip
@@ -1073,12 +1104,13 @@ class WiFiTransferService extends ChangeNotifier {
         }
         
         async function loadJSZip() {
-            // Load JSZip library dynamically
+            if (window.JSZip) return window.JSZip;
             const script = document.createElement('script');
             script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
             document.head.appendChild(script);
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 script.onload = () => resolve(window.JSZip);
+                script.onerror = () => reject(new Error('Could not load folder upload script. Check internet connection.'));
             });
         }
         
@@ -1348,13 +1380,15 @@ class WiFiTransferService extends ChangeNotifier {
             return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
         }
         
-        // Load files and stats on page load
-        loadFiles();
-        loadFolders();
-        loadStats();
-        setInterval(loadFiles, 5000); // Refresh every 5 seconds
-        setInterval(loadFolders, 5000);
-        setInterval(loadStats, 5000);
+        // Load files and stats on page load (only when token is present)
+        if (TOKEN) {
+            loadFiles();
+            loadFolders();
+            loadStats();
+            setInterval(loadFiles, 5000);
+            setInterval(loadFolders, 5000);
+            setInterval(loadStats, 5000);
+        }
     </script>
 </body>
 </html>

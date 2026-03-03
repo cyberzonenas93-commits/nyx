@@ -19,17 +19,83 @@ import 'privacy_policy_page.dart';
 import '../../onboarding/pages/onboarding_page.dart';
 
 /// Settings page with subscription management
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
-  
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  int _titleTapCount = 0;
+  DateTime? _titleLastTapAt;
+  static const _tapWindow = Duration(seconds: 2);
+  static const _tapsRequired = 7;
+
+  void _onAppBarTitleTap() {
+    final now = DateTime.now();
+    if (_titleLastTapAt != null && now.difference(_titleLastTapAt!) > _tapWindow) {
+      _titleTapCount = 0;
+    }
+    _titleTapCount++;
+    _titleLastTapAt = now;
+    if (_titleTapCount >= _tapsRequired) {
+      _titleTapCount = 0;
+      _titleLastTapAt = null;
+      _showGodModePinVerification();
+    }
+  }
+
+  Future<void> _showGodModePinVerification() async {
+    if (!mounted) return;
+    final verifiedPIN = await PinVerificationDialog.show(context);
+    if (verifiedPIN == null || verifiedPIN.isEmpty || !mounted) return;
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final result = await authService.verifyPIN(verifiedPIN);
+    if (!mounted) return;
+
+    if (result == AuthResult.unlocked) {
+      final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+      await subscriptionService.toggleGodMode();
+      if (!mounted) return;
+      final isOn = subscriptionService.isGodMode;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isOn ? 'God mode on – full access' : 'God mode off'),
+          backgroundColor: isOn ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Incorrect PIN'),
+          backgroundColor: AppTheme.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final subscriptionService = Provider.of<SubscriptionService>(context);
-    
+
     return Scaffold(
       backgroundColor: AppTheme.primary,
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: GestureDetector(
+          onTap: _onAppBarTitleTap,
+          behavior: HitTestBehavior.opaque,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('Settings'),
+          ),
+        ),
         backgroundColor: AppTheme.surface,
         elevation: 0,
       ),

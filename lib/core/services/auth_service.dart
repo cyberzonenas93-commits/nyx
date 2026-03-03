@@ -217,8 +217,13 @@ class AuthService extends ChangeNotifier {
     _masterKey = null;
     _currentVaultId = null;
     _appState = AppState.locked;
-    await _secureStorage.write(key: 'was_unlocked', value: 'false');
+    // Notify immediately so UI switches to unlock screen even if storage write fails
     notifyListeners();
+    try {
+      await _secureStorage.write(key: 'was_unlocked', value: 'false');
+    } catch (e) {
+      debugPrint('[AuthService] lockVault: secure storage write failed: $e');
+    }
   }
   
   /// Switch to home state
