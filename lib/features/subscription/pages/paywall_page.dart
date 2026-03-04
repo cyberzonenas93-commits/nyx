@@ -460,37 +460,9 @@ class _PaywallPageState extends State<PaywallPage> {
     });
     
     final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    
-    // Check if user can start free trial
-    if (subscriptionService.canStartTrial) {
-      // Start free trial first
-      await subscriptionService.startFreeTrial();
-      
-      if (!mounted) return;
-      
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Free trial started! Enjoy 7 days of premium access.'),
-          backgroundColor: AppTheme.accent,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-      
-      setState(() {
-        _isPurchasing = false;
-      });
-      
-      // Close paywall after starting trial
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted && widget.showCloseButton) {
-          Navigator.of(context).pop();
-        }
-      });
-      return;
-    }
-    
-    // User has already used trial, proceed with purchase
+
+    // Always use the platform purchase flow.
+    // Any free-trial eligibility is applied by App Store / Play Store.
     final success = await subscriptionService.purchaseSubscription(_selectedTier!);
     
     if (!mounted) return;
