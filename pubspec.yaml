@@ -1,7 +1,7 @@
 name: nyx
 description: Nyx - A secure media privacy vault app with zero-knowledge architecture
 publish_to: 'none'
-version: 1.0.2+5
+version: 1.0.3+6
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
