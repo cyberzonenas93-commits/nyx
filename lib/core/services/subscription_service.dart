@@ -17,6 +17,9 @@ class SubscriptionService extends ChangeNotifier {
   bool _isLoadingProducts = true;
   bool _hasFinishedLoading = false;
   bool _godMode = false; // Hidden God mode - bypasses all paywalls
+
+  // Purchase error tracking (used to unblock UI when user cancels/fails a purchase)
+  DateTime? _lastPurchaseErrorAt;
   
   // Free trial tracking
   DateTime? _trialStartDate;
@@ -262,6 +265,8 @@ class SubscriptionService extends ChangeNotifier {
       debugPrint('Error message: ${purchase.error!.message}');
       debugPrint('Error details: ${purchase.error!.details}');
     }
+    _lastPurchaseErrorAt = DateTime.now();
+    notifyListeners();
     // Handle error - keep current tier
     // Purchase will be retried automatically by the store if needed
   }
@@ -320,18 +325,28 @@ class SubscriptionService extends ChangeNotifier {
   Future<bool> waitForPremiumEntitlement({
     Duration timeout = const Duration(minutes: 2),
   }) async {
+    final waitStartedAt = DateTime.now();
     bool hasEntitlement() {
       if (_godMode) return true;
       if (isInTrial) return true;
       return _currentTier.isUnlimited && _status == SubscriptionStatus.active;
     }
 
+    bool hasPurchaseErrorSinceWaitStarted() {
+      return _lastPurchaseErrorAt != null && _lastPurchaseErrorAt!.isAfter(waitStartedAt);
+    }
+
     if (hasEntitlement()) return true;
+    if (hasPurchaseErrorSinceWaitStarted()) return false;
 
     final completer = Completer<bool>();
     void listener() {
       if (hasEntitlement() && !completer.isCompleted) {
         completer.complete(true);
+        return;
+      }
+      if (hasPurchaseErrorSinceWaitStarted() && !completer.isCompleted) {
+        completer.complete(false);
       }
     }
 
