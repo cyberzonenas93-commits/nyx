@@ -7,7 +7,6 @@ import '../../../core/models/subscription_tier.dart';
 import '../../../core/services/subscription_service.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../shared/widgets/secure_button.dart';
-import '../../unlock/pages/unlock_method_selection_page.dart';
 import '../../unlock/pages/pin_setup_page.dart';
 
 /// Subscription setup page shown during onboarding
@@ -67,20 +66,24 @@ class _SubscriptionSetupPageState extends State<SubscriptionSetupPage> {
     });
     
     final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    
-    // Check if user can start trial
-    if (subscriptionService.canStartTrial) {
-      // Start free trial
-      await subscriptionService.startFreeTrial();
-      
-      if (!mounted) return;
-      
+
+    // Always use the platform purchase flow.
+    // Any introductory trial is applied by App Store / Play Store after confirmation.
+    final success = await subscriptionService.purchaseSubscription(_selectedTier!);
+
+    if (!mounted) return;
+
+    setState(() {
+      _isStartingTrial = false;
+    });
+
+    if (success) {
       // Update auth state first
       final authService = Provider.of<AuthService>(context, listen: false);
       await authService.completeOnboarding();
-      
+
       if (!mounted) return;
-      
+
       // Navigate directly to PIN setup, clearing the navigation stack
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
@@ -89,29 +92,9 @@ class _SubscriptionSetupPageState extends State<SubscriptionSetupPage> {
         (route) => false, // Remove all previous routes
       );
     } else {
-      // User already used trial - proceed with purchase
-      final success = await subscriptionService.purchaseSubscription(_selectedTier!);
-      
-      if (!mounted) return;
-      
       setState(() {
-        _isStartingTrial = false;
+        _errorMessage = 'Failed to open the payment flow. Please try again.';
       });
-      
-      if (success) {
-        // Update auth state - this will trigger Consumer to rebuild and show correct page
-        final authService = Provider.of<AuthService>(context, listen: false);
-        await authService.completeOnboarding();
-        
-        if (!mounted) return;
-        
-        // Pop this page and let the Consumer in app.dart handle navigation
-        Navigator.of(context).pop();
-      } else {
-        setState(() {
-          _errorMessage = 'Failed to start subscription. Please try again.';
-        });
-      }
     }
   }
   
