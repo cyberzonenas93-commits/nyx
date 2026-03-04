@@ -4,10 +4,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../../app/theme.dart';
 import '../../../core/services/multi_vault_service.dart';
 import '../../../core/services/auth_service.dart';
-import '../../../core/services/encryption_service.dart';
+import '../../../core/services/vault_service.dart';
 import '../../../core/models/vault_metadata.dart';
 import '../../../shared/widgets/pin_verification_dialog.dart';
+import '../../../shared/widgets/pattern_verification_dialog.dart';
 import '../../../features/unlock/pages/pin_setup_page.dart';
+import '../../../features/unlock/pages/pattern_setup_page.dart';
+import 'vault_home_page.dart';
 
 /// Page for managing multiple vaults (only accessible from primary vault)
 class VaultManagementPage extends StatefulWidget {
@@ -46,84 +49,81 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
   
   Future<void> _verifyPrimaryVaultPIN() async {
     try {
-      Future.microtask(() {
-        if (mounted) {
+      if (mounted) {
+        setState(() {
+          _isVerifying = true;
+          _errorMessage = null;
+        });
+      }
+
+      if (!mounted) return;
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final unlockMethod = await authService.getUnlockMethod();
+
+      if (unlockMethod == 'pattern') {
+        final verified = await PatternVerificationDialog.show(
+          context,
+          title: 'Draw primary vault pattern',
+          message: 'Draw your pattern to view vault management',
+        );
+        if (!mounted) return;
+        if (verified == true) {
           setState(() {
-            _isVerifying = true;
+            _isAuthenticated = true;
+            _isVerifying = false;
             _errorMessage = null;
           });
-        }
-      });
-      
-      // Show PIN verification dialog
-      if (!mounted) return;
-      final verifiedPIN = await PinVerificationDialog.show(
-        context,
-        title: 'Enter Primary Vault PIN',
-        message: 'Enter your primary vault PIN to view all vault information',
-      );
-      
-      if (verifiedPIN == null || verifiedPIN.isEmpty) {
-        if (mounted) {
-          Future.microtask(() {
-            if (mounted) {
-              setState(() {
-                _isVerifying = false;
-              });
-            }
-          });
-          Navigator.of(context).pop(); // Go back if cancelled
+        } else {
+          setState(() => _isVerifying = false);
+          Navigator.of(context).pop();
         }
         return;
       }
-      
+
+      final verifiedPIN = await PinVerificationDialog.show(
+        context,
+        title: 'Enter primary vault PIN',
+        message: 'Enter your PIN to view all vault information',
+      );
+
+      if (verifiedPIN == null || verifiedPIN.isEmpty) {
+        if (mounted) {
+          setState(() => _isVerifying = false);
+          Navigator.of(context).pop();
+        }
+        return;
+      }
+
       if (!mounted) return;
-      
-      final authService = Provider.of<AuthService>(context, listen: false);
       final result = await authService.verifyPIN(verifiedPIN);
       
       if (!mounted) return;
-      
       if (result == AuthResult.unlocked) {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _isAuthenticated = true;
-              _isVerifying = false;
-              _errorMessage = null;
-            });
-          }
+        setState(() {
+          _isAuthenticated = true;
+          _isVerifying = false;
+          _errorMessage = null;
         });
       } else {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _isAuthenticated = false;
-              _isVerifying = false;
-              _errorMessage = 'Incorrect PIN. Please try again.';
-            });
-            
-            // Show error and allow retry
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Incorrect PIN'),
-                backgroundColor: AppTheme.warning,
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
+        setState(() {
+          _isAuthenticated = false;
+          _isVerifying = false;
+          _errorMessage = 'Incorrect PIN. Please try again.';
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Incorrect PIN'),
+            backgroundColor: AppTheme.warning,
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
     } catch (e) {
-      debugPrint('[VaultManagementPage] Error verifying PIN: $e');
+      debugPrint('[VaultManagementPage] Error verifying: $e');
       if (mounted) {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _isVerifying = false;
-              _errorMessage = 'Error: ${e.toString()}';
-            });
-          }
+        setState(() {
+          _isVerifying = false;
+          _errorMessage = 'Error: ${e.toString()}';
         });
       }
     }
@@ -290,6 +290,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                                         vault: vault,
                                         isPrimary: false,
                                         details: vaultDetails[vault.id] ?? {},
+                                        onOpen: () => _openSecondaryVault(context, vault),
                                         onDelete: () => _deleteVault(context, vault),
                                         onResetPIN: () => _resetSecondaryVaultPIN(context, vault),
                                       )),
@@ -475,14 +476,16 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
     // Get secondary vault details
     for (final vault in multiVaultService.vaults.where((v) => !v.isPrimary)) {
       final recoveryInfo = await multiVaultService.getRecoveryInfo(vault.id, secureStorage: secureStorage);
+      final usesPattern = await multiVaultService.vaultUsesPattern(vault.id);
+      final hasPIN = recoveryInfo['pinHash'] != null && recoveryInfo['pinSalt'] != null;
+      final hasPattern = usesPattern;
       details[vault.id] = {
         'triggerCode': recoveryInfo['triggerCode'] ?? 'Not set',
-        'vaultCode': recoveryInfo['pinHash'] != null && recoveryInfo['pinSalt'] != null 
-            ? 'Set' 
-            : 'Not set',
-        'vaultCodeNote': recoveryInfo['pinHash'] != null && recoveryInfo['pinSalt'] != null
-            ? 'PIN is set (cannot display for security)'
-            : 'PIN not set',
+        'vaultCode': (hasPIN || hasPattern) ? 'Set' : 'Not set',
+        'vaultCodeNote': hasPattern
+            ? 'Pattern is set (cannot display for security)'
+            : (hasPIN ? 'PIN is set (cannot display for security)' : 'PIN not set'),
+        'usesPattern': hasPattern ? 'true' : 'false',
       };
     }
     
@@ -501,43 +504,50 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
   }
   
   Future<void> _resetSecondaryVaultPIN(BuildContext context, VaultMetadata vault) async {
-    // Verify primary vault PIN first for security
-    final verifiedPIN = await PinVerificationDialog.show(
-      context,
-      title: 'Verify Primary Vault PIN',
-      message: 'Enter your primary vault PIN to reset the PIN for "${vault.name}"',
-    );
-    
-    if (verifiedPIN == null || verifiedPIN.isEmpty) {
-      return;
-    }
-    
     final authService = Provider.of<AuthService>(context, listen: false);
-    final result = await authService.verifyPIN(verifiedPIN);
-    
-    if (result != AuthResult.unlocked) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Incorrect PIN'),
-            backgroundColor: AppTheme.warning,
-          ),
-        );
+    final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+    final usesPattern = await multiVaultService.vaultUsesPattern(vault.id);
+    final primaryMethod = await authService.getUnlockMethod();
+
+    // Verify primary vault (pattern or PIN) first
+    if (primaryMethod == 'pattern') {
+      final verified = await PatternVerificationDialog.show(
+        context,
+        title: 'Verify primary vault',
+        message: 'Draw your primary pattern to continue',
+      );
+      if (verified != true) return;
+    } else {
+      final verifiedPIN = await PinVerificationDialog.show(
+        context,
+        title: 'Verify primary vault',
+        message: 'Enter your primary vault PIN to continue',
+      );
+      if (verifiedPIN == null || verifiedPIN.isEmpty) return;
+      final result = await authService.verifyPIN(verifiedPIN);
+      if (result != AuthResult.unlocked) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Incorrect PIN'), backgroundColor: AppTheme.warning),
+          );
+        }
+        return;
       }
-      return;
     }
-    
-    // Show confirmation dialog
+
+    final isPatternVault = usesPattern;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text(
-          'Reset PIN?',
-          style: TextStyle(color: AppTheme.text),
+        title: Text(
+          isPatternVault ? 'Reset pattern?' : 'Reset PIN?',
+          style: const TextStyle(color: AppTheme.text),
         ),
         content: Text(
-          'Are you sure you want to reset the PIN for "${vault.name}"?\n\nYou will need to set a new PIN to access this vault.',
+          isPatternVault
+              ? 'Are you sure you want to reset the pattern for "${vault.name}"? You will need to set a new pattern.'
+              : 'Are you sure you want to reset the PIN for "${vault.name}"? You will need to set a new PIN.',
           style: const TextStyle(color: AppTheme.text),
         ),
         actions: [
@@ -547,45 +557,95 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.accent,
-            ),
-            child: const Text('Reset PIN'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.accent),
+            child: Text(isPatternVault ? 'Reset pattern' : 'Reset PIN'),
           ),
         ],
       ),
     );
-    
+
     if (confirmed != true || !mounted) return;
-    
-    // Navigate to PIN setup page for this vault
+
     if (mounted) {
+      final page = isPatternVault
+          ? PatternSetupPage(vaultIdToReset: vault.id)
+          : PinSetupPage(
+              isChangeMethod: false,
+              vaultName: vault.name,
+              vaultTriggerCode: vault.triggerCode,
+              isSecondaryVault: true,
+              isResettingPIN: true,
+              vaultIdToReset: vault.id,
+            );
       Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => PinSetupPage(
-            isChangeMethod: false,
-            vaultName: vault.name,
-            vaultTriggerCode: vault.triggerCode,
-            isSecondaryVault: true,
-            isResettingPIN: true, // Indicate this is a PIN reset
-            vaultIdToReset: vault.id, // Pass the vault ID to reset
-          ),
-        ),
+        MaterialPageRoute(builder: (context) => page),
       ).then((result) {
         if (mounted && result == true) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('PIN reset successfully for "${vault.name}"'),
+              content: Text(
+                isPatternVault
+                    ? 'Pattern reset successfully for "${vault.name}"'
+                    : 'PIN reset successfully for "${vault.name}"',
+              ),
               backgroundColor: AppTheme.accent,
             ),
           );
-          // Refresh the page to show updated PIN status
           setState(() {});
         }
       });
     }
   }
   
+  Future<void> _openSecondaryVault(BuildContext context, VaultMetadata vault) async {
+    final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final usesPattern = await multiVaultService.vaultUsesPattern(vault.id);
+
+    if (usesPattern) {
+      final verified = await PatternVerificationDialog.show(
+        context,
+        title: 'Open ${vault.name}',
+        message: 'Draw the pattern for this vault',
+        vaultId: vault.id,
+      );
+      if (verified != true || !mounted) return;
+    } else {
+      final verifiedPIN = await PinVerificationDialog.show(
+        context,
+        title: 'Open ${vault.name}',
+        message: 'Enter the PIN for this vault',
+      );
+      if (verifiedPIN == null || verifiedPIN.isEmpty || !mounted) return;
+      final ok = await authService.verifySecondaryVaultPIN(vault.id, verifiedPIN);
+      if (!mounted) return;
+      if (ok != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Incorrect PIN'),
+            backgroundColor: AppTheme.warning,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    }
+
+    final vaultService = Provider.of<VaultService>(context, listen: false);
+    await vaultService.initialize(
+      masterKey: authService.masterKey,
+      vaultId: vault.id,
+    );
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => VaultHomePage(vaultId: vault.id),
+      ),
+      (route) => false,
+    );
+  }
+
   Future<void> _deleteVault(BuildContext context, VaultMetadata vault) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -646,6 +706,7 @@ class _VaultDetailTile extends StatelessWidget {
   final VaultMetadata vault;
   final bool isPrimary;
   final Map<String, String?> details;
+  final VoidCallback? onOpen;
   final VoidCallback? onDelete;
   final VoidCallback? onResetPIN;
   
@@ -653,6 +714,7 @@ class _VaultDetailTile extends StatelessWidget {
     required this.vault,
     required this.isPrimary,
     required this.details,
+    this.onOpen,
     this.onDelete,
     this.onResetPIN,
   });
@@ -763,12 +825,28 @@ class _VaultDetailTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _DetailField(
-                    label: 'Vault Code (PIN)',
+                    label: 'Unlock (PIN or pattern)',
                     value: details['vaultCode'] ?? 'Not set',
                     icon: Icons.lock,
                     note: details['vaultCodeNote'],
                     isImportant: true,
                   ),
+                  if (!isPrimary && onOpen != null) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: onOpen,
+                        icon: const Icon(Icons.folder_open, size: 18),
+                        label: const Text('Open vault'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.accent,
+                          foregroundColor: AppTheme.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
                   if (!isPrimary && details['vaultCode'] == 'Set' && onResetPIN != null) ...[
                     const SizedBox(height: 12),
                     SizedBox(
@@ -776,7 +854,7 @@ class _VaultDetailTile extends StatelessWidget {
                       child: OutlinedButton.icon(
                         onPressed: onResetPIN,
                         icon: const Icon(Icons.lock_reset, size: 18),
-                        label: const Text('Reset PIN'),
+                        label: Text(details['usesPattern'] == 'true' ? 'Reset pattern' : 'Reset PIN'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.accent,
                           side: BorderSide(color: AppTheme.accent.withOpacity(0.5)),
@@ -924,78 +1002,69 @@ class VaultCreationPage extends StatefulWidget {
 
 class _VaultCreationPageState extends State<VaultCreationPage> {
   final _nameController = TextEditingController();
-  final _triggerCodeController = TextEditingController();
   String? _errorMessage;
   bool _isCreating = false;
   
   @override
   void dispose() {
     _nameController.dispose();
-    _triggerCodeController.dispose();
     super.dispose();
+  }
+  
+  /// Generate a numeric trigger code for the vault (no leading zero).
+  String _generateTriggerCode() {
+    final r = DateTime.now().millisecondsSinceEpoch % 1000000;
+    return (100000 + r).toString();
   }
   
   Future<void> _createVault() async {
     final name = _nameController.text.trim();
-    final triggerCode = _triggerCodeController.text.trim();
-    
-    // Validate
+
     if (name.isEmpty) {
       setState(() {
         _errorMessage = 'Vault name cannot be empty';
       });
       return;
     }
-    
-    if (triggerCode.isEmpty) {
-      setState(() {
-        _errorMessage = 'Trigger code cannot be empty';
-      });
-      return;
-    }
-    
-    if (!RegExp(r'^\d+$').hasMatch(triggerCode)) {
-      setState(() {
-        _errorMessage = 'Trigger code must contain only numbers';
-      });
-      return;
-    }
-    
-    if (triggerCode.startsWith('0')) {
-      setState(() {
-        _errorMessage = 'Trigger code cannot start with 0';
-      });
-      return;
-    }
-    
+
+    final triggerCode = _generateTriggerCode();
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final unlockMethod = await authService.getUnlockMethod();
+
     setState(() {
       _isCreating = true;
       _errorMessage = null;
     });
-    
-    // Navigate to PIN setup for the new vault
-    if (mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => PinSetupPage(
+
+    if (!mounted) return;
+
+    final usePattern = unlockMethod == 'pattern';
+    final page = usePattern
+        ? PatternSetupPage(
+            vaultName: name,
+            vaultTriggerCode: triggerCode,
+          )
+        : PinSetupPage(
             isChangeMethod: false,
             vaultName: name,
             vaultTriggerCode: triggerCode,
             isSecondaryVault: true,
-          ),
-        ),
-      ).then((result) {
-        if (mounted) {
-          if (result == true) {
-            Navigator.of(context).pop(true); // Return success
-          } else {
-            setState(() {
-              _isCreating = false;
-            });
-          }
+          );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => page,
+      ),
+    ).then((result) {
+      if (mounted) {
+        if (result == true) {
+          Navigator.of(context).pop(true);
+        } else {
+          setState(() {
+            _isCreating = false;
+          });
         }
-      });
-    }
+      }
+    });
   }
   
   @override
@@ -1013,7 +1082,7 @@ class _VaultCreationPageState extends State<VaultCreationPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Create a new vault with its own trigger code and PIN.',
+              'Create a new vault with its own unlock method (same as your primary vault: PIN or pattern). Use it on the unlock screen to open this vault.',
               style: TextStyle(
                 fontSize: 16,
                 color: AppTheme.text.withOpacity(0.8),
@@ -1025,31 +1094,9 @@ class _VaultCreationPageState extends State<VaultCreationPage> {
               decoration: InputDecoration(
                 labelText: 'Vault Name',
                 hintText: 'e.g., Work Vault, Personal Vault',
-                errorText: _errorMessage?.contains('name') == true ? _errorMessage : null,
+                errorText: _errorMessage,
               ),
             ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _triggerCodeController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Trigger Code',
-                hintText: 'e.g., 123456',
-                helperText: 'Optional code; use your PIN on the unlock screen to open this vault',
-                errorText: _errorMessage?.contains('Trigger') == true ||
-                        _errorMessage?.contains('code') == true
-                    ? _errorMessage
-                    : null,
-              ),
-            ),
-            if (_errorMessage != null && !_errorMessage!.contains('name') && !_errorMessage!.contains('Trigger') && !_errorMessage!.contains('code'))
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _errorMessage!,
-                  style: const TextStyle(color: AppTheme.warning),
-                ),
-              ),
             const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
@@ -1062,7 +1109,7 @@ class _VaultCreationPageState extends State<VaultCreationPage> {
                 ),
                 child: _isCreating
                     ? const CircularProgressIndicator(color: AppTheme.primary)
-                    : const Text('Continue to PIN Setup'),
+                    : const Text('Continue'),
               ),
             ),
           ],

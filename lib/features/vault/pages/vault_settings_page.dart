@@ -25,43 +25,6 @@ class VaultSettingsPage extends StatefulWidget {
 }
 
 class _VaultSettingsPageState extends State<VaultSettingsPage> {
-  String? _unlockTriggerCode;
-  bool _isLoadingTriggerCode = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadUnlockTriggerCode();
-  }
-
-  Future<void> _loadUnlockTriggerCode() async {
-    try {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      final code = await authService.getUnlockTriggerCode();
-      if (mounted) {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _unlockTriggerCode = code;
-              _isLoadingTriggerCode = false;
-            });
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('[VaultSettingsPage] Error loading trigger code: $e');
-      if (mounted) {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _isLoadingTriggerCode = false;
-            });
-          }
-        });
-      }
-    }
-  }
-  
   Future<void> _changePIN() async {
     try {
       final confirmed = await showDialog<bool>(
@@ -138,55 +101,6 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
     }
   }
 
-  Future<void> _changeUnlockTriggerCode() async {
-    try {
-      final result = await showDialog<String>(
-        context: context,
-        builder: (context) => _UnlockTriggerCodeDialog(currentCode: _unlockTriggerCode),
-      );
-
-      if (result != null && result.isNotEmpty && mounted) {
-        final authService = Provider.of<AuthService>(context, listen: false);
-        final success = await authService.setUnlockTriggerCode(result);
-
-        if (!mounted) return;
-
-        if (success) {
-          await _loadUnlockTriggerCode();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Unlock trigger code updated'),
-                backgroundColor: AppTheme.accent,
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Invalid code. Code must contain only numbers and cannot start with 0.'),
-                backgroundColor: AppTheme.warning,
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('[VaultSettingsPage] Error changing trigger code: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: AppTheme.warning,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
 
   
   Future<void> _manageSubscription() async {
@@ -530,38 +444,9 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                 ),
                 onTap: _changePIN,
               ),
-              
-              const Divider(height: 1),
-
-              ListTile(
-                leading: const Icon(Icons.vpn_key, color: AppTheme.accent),
-                title: const Text(
-                  'Unlock code',
-                  style: TextStyle(
-                    color: AppTheme.text,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                subtitle: Text(
-                  _isLoadingTriggerCode
-                      ? 'Loading...'
-                      : (_unlockTriggerCode != null
-                          ? 'Current: $_unlockTriggerCode'
-                          : 'Optional code (PIN used on unlock screen)'),
-                  style: TextStyle(
-                    color: AppTheme.text.withOpacity(0.6),
-                    fontSize: 12,
-                  ),
-                ),
-                trailing: Icon(
-                  Icons.chevron_right,
-                  color: AppTheme.text.withOpacity(0.4),
-                ),
-                onTap: _changeUnlockTriggerCode,
-              ),
 
               const Divider(height: 1),
-              
+
               ListTile(
                 leading: const Icon(Icons.security, color: AppTheme.accent),
                 title: const Text(
@@ -613,31 +498,46 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                   _buildSection(
                     title: 'Multiple Vaults',
                     children: [
-                      ListTile(
-                        leading: const Icon(Icons.folder_special, color: AppTheme.accent),
-                        title: const Text(
-                          'Manage Vaults',
-                          style: TextStyle(
-                            color: AppTheme.text,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        subtitle: Text(
-                          '${multiVaultService.vaultCount} vault${multiVaultService.vaultCount != 1 ? 's' : ''} (${multiVaultService.maxVaults} max)',
-                          style: TextStyle(
-                            color: AppTheme.text.withOpacity(0.6),
-                            fontSize: 12,
-                          ),
-                        ),
-                        trailing: Icon(
-                          Icons.chevron_right,
-                          color: AppTheme.text.withOpacity(0.4),
-                        ),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => const VaultManagementPage(),
+                      Consumer<SubscriptionService>(
+                        builder: (context, subscriptionService, _) {
+                          final hasPremium = subscriptionService.canAccessMultipleVaults;
+                          return ListTile(
+                            leading: const Icon(Icons.folder_special, color: AppTheme.accent),
+                            title: const Text(
+                              'Manage Vaults',
+                              style: TextStyle(
+                                color: AppTheme.text,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
+                            subtitle: Text(
+                              hasPremium
+                                  ? '${multiVaultService.vaultCount} vault${multiVaultService.vaultCount != 1 ? 's' : ''} (${multiVaultService.maxVaults} max)'
+                                  : 'Subscribe to create multiple vaults',
+                              style: TextStyle(
+                                color: AppTheme.text.withOpacity(0.6),
+                                fontSize: 12,
+                              ),
+                            ),
+                            trailing: Icon(
+                              Icons.chevron_right,
+                              color: AppTheme.text.withOpacity(0.4),
+                            ),
+                            onTap: () {
+                              if (!hasPremium) {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => const PaywallPage(showCloseButton: true),
+                                  ),
+                                );
+                                return;
+                              }
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) => const VaultManagementPage(),
+                                ),
+                              );
+                            },
                           );
                         },
                       ),
@@ -1136,118 +1036,6 @@ class _StorageOption extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _UnlockTriggerCodeDialog extends StatefulWidget {
-  final String? currentCode;
-
-  const _UnlockTriggerCodeDialog({this.currentCode});
-
-  @override
-  State<_UnlockTriggerCodeDialog> createState() => _UnlockTriggerCodeDialogState();
-}
-
-class _UnlockTriggerCodeDialogState extends State<_UnlockTriggerCodeDialog> {
-  final TextEditingController _controller = TextEditingController();
-  String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.currentCode != null) {
-      _controller.text = widget.currentCode!;
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _validateAndSubmit() {
-    final code = _controller.text.trim();
-
-    if (code.isEmpty) {
-      setState(() {
-        _errorMessage = 'Code cannot be empty';
-      });
-      return;
-    }
-
-    if (!RegExp(r'^\d+$').hasMatch(code)) {
-      setState(() {
-        _errorMessage = 'Code must contain only numbers';
-      });
-      return;
-    }
-
-    if (code.startsWith('0')) {
-      setState(() {
-        _errorMessage = 'Code cannot start with 0. Please enter a code that starts with 1-9.';
-      });
-      return;
-    }
-
-    Navigator.of(context).pop(code);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppTheme.surface,
-      title: const Text(
-        'Set Unlock Trigger Code',
-        style: TextStyle(color: AppTheme.text),
-      ),
-      content: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Optional code for this vault. Your PIN is used on the unlock screen to open your vault.',
-              style: TextStyle(color: AppTheme.text),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _controller,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: AppTheme.text),
-              decoration: InputDecoration(
-                labelText: 'Trigger Code',
-                labelStyle: TextStyle(color: AppTheme.text.withOpacity(0.7)),
-                hintText: 'e.g., 123456',
-                hintStyle: TextStyle(color: AppTheme.text.withOpacity(0.4)),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.text.withOpacity(0.3)),
-                ),
-                focusedBorder: const OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.accent),
-                ),
-                errorText: _errorMessage,
-              ),
-              autofocus: true,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: _validateAndSubmit,
-          style: TextButton.styleFrom(
-            foregroundColor: AppTheme.accent,
-          ),
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }

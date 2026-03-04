@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../app/theme.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/tamper_detection_service.dart';
+import '../../../core/services/multi_vault_service.dart';
 import '../../../core/models/app_state.dart';
 import '../../vault/pages/vault_home_page.dart';
+import '../widgets/pattern_lock_widget.dart';
 
 // Intent classes for keyboard shortcuts
 class _NumericIntent extends Intent {
@@ -27,12 +28,12 @@ class UnlockPage extends StatefulWidget {
 }
 
 class _UnlockPageState extends State<UnlockPage> {
-  // Use ValueNotifier for PIN to minimize rebuilds
   final ValueNotifier<String> _pinNotifier = ValueNotifier<String>('');
-  String _pin = ''; // Keep for verification
+  final ValueNotifier<String?> _errorMessageNotifier = ValueNotifier<String?>(null);
+  String _pin = '';
   bool _isLoading = false;
-  String? _errorMessage;
-  String? _unlockMethod; // Always 'pin' now
+  String? _unlockMethod;
+  bool _patternWrongAttempt = false;
   
   @override
   void initState() {
@@ -43,6 +44,7 @@ class _UnlockPageState extends State<UnlockPage> {
   @override
   void dispose() {
     _pinNotifier.dispose();
+    _errorMessageNotifier.dispose();
     super.dispose();
   }
   
@@ -68,45 +70,27 @@ class _UnlockPageState extends State<UnlockPage> {
   }
   
   Future<void> _checkUnlockMethod() async {
-    // Pattern unlock removed - always use PIN
-    Future.microtask(() {
-      if (mounted) {
-        setState(() {
-          _unlockMethod = 'pin';
-        });
-      }
-    });
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final method = await authService.getUnlockMethod();
+    if (mounted) {
+      setState(() {
+        _unlockMethod = method ?? 'pin';
+      });
+    }
   }
   
   void _onNumberPressed(String number) {
     if (_pin.length >= 6) return;
     
-    // Prevent 0 as first digit (during setup or unlock)
     if (_pin.isEmpty && number == '0') {
-      SchedulerBinding.instance.scheduleFrameCallback((_) {
-        if (!mounted) return;
-        setState(() {
-          _errorMessage = 'PIN cannot start with 0. Please enter a number from 1-9 first.';
-        });
-      });
+      _errorMessageNotifier.value = 'PIN cannot start with 0. Please enter a number from 1-9 first.';
       return;
     }
     
-    // Update PIN immediately for responsiveness
     _pin += number;
     _pinNotifier.value = _pin;
+    if (_errorMessageNotifier.value != null) _errorMessageNotifier.value = null;
     
-    // Clear error message if any
-    if (_errorMessage != null) {
-      SchedulerBinding.instance.scheduleFrameCallback((_) {
-        if (!mounted) return;
-        setState(() {
-          _errorMessage = null;
-        });
-      });
-    }
-    
-    // Verify PIN after a short delay to allow UI to update smoothly
     if (_pin.length == 6) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _verifyPIN();
@@ -116,159 +100,161 @@ class _UnlockPageState extends State<UnlockPage> {
   
   void _onBackspace() {
     if (_pin.isEmpty) return;
-    
-    // Update PIN immediately for responsiveness
     _pin = _pin.substring(0, _pin.length - 1);
     _pinNotifier.value = _pin;
-    
-    // Clear error message if any
-    if (_errorMessage != null) {
-      SchedulerBinding.instance.scheduleFrameCallback((_) {
-        if (!mounted) return;
-        setState(() {
-          _errorMessage = null;
-        });
-      });
-    }
+    if (_errorMessageNotifier.value != null) _errorMessageNotifier.value = null;
   }
   
   Future<void> _setupVault(String pin) async {
-    Future.microtask(() {
-      if (mounted) {
-        setState(() {
-          _isLoading = true;
-          _errorMessage = null;
-        });
-      }
-    });
-    
+    if (mounted) {
+      setState(() => _isLoading = true);
+      _errorMessageNotifier.value = null;
+    }
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       final success = await authService.setupPIN(pin);
-      
       if (!mounted) return;
-      
-      Future.microtask(() {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            if (!success) {
-              _pin = '';
-              _pinNotifier.value = _pin;
-              _errorMessage = 'Failed to set up vault';
-            }
-          });
-        }
-      });
+      setState(() => _isLoading = false);
+      if (!success) {
+        _pin = '';
+        _pinNotifier.value = _pin;
+        _errorMessageNotifier.value = 'Failed to set up vault';
+      }
     } catch (e) {
       debugPrint('[UnlockPage] Error setting up vault: $e');
       if (mounted) {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _pin = '';
-              _pinNotifier.value = _pin;
-              _errorMessage = 'Failed to set up vault: ${e.toString()}';
-            });
-          }
-        });
+        setState(() => _isLoading = false);
+        _pin = '';
+        _pinNotifier.value = _pin;
+        _errorMessageNotifier.value = 'Failed to set up vault: ${e.toString()}';
       }
     }
   }
   
+  void _navigateToVault(String? vaultId) {
+    setState(() => _isLoading = false);
+    _errorMessageNotifier.value = null;
+    _pin = '';
+    _pinNotifier.value = _pin;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => VaultHomePage(vaultId: vaultId),
+      ),
+      (route) => false,
+    );
+  }
+
   Future<void> _verifyPIN() async {
-    Future.microtask(() {
-      if (mounted) {
-        setState(() {
-          _isLoading = true;
-          _errorMessage = null;
-        });
-      }
-    });
-    
+    if (mounted) {
+      setState(() => _isLoading = true);
+      _errorMessageNotifier.value = null;
+    }
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
-      
-      // Check for tampering before unlock attempt
       final tamperResult = await tamperDetection.checkTampering();
       if (tamperResult.isTampered && tamperResult.shouldWipe) {
         if (mounted) {
-          Future.microtask(() {
-            if (mounted) {
-              setState(() {
-                _isLoading = false;
-                _errorMessage = 'Security violation detected. Vault has been wiped.';
-              });
-            }
-          });
+          setState(() => _isLoading = false);
+          _errorMessageNotifier.value = 'Security violation detected. Vault has been wiped.';
         }
         return;
       }
-    
       final result = await authService.verifyPIN(_pin);
-      
       if (!mounted) return;
-      
-      // Handle setup separately if needed
       if (result == AuthResult.notInitialized) {
         await _setupVault(_pin);
         return;
       }
-      
-      // Record failed attempt or reset on success
-      if (result == AuthResult.failed) {
-        await tamperDetection.recordFailedAttempt();
-      } else if (result == AuthResult.unlocked) {
+      if (result == AuthResult.unlocked) {
         await tamperDetection.resetFailedAttempts();
+        if (mounted) _navigateToVault(authService.currentVaultId);
+        return;
       }
-      
-      if (mounted) {
-        final vaultId = authService.currentVaultId;
-        Future.microtask(() {
+      if (result == AuthResult.failed) {
+        final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+        final secondaryVaults = multiVaultService.vaults.where((v) => !v.isPrimary).toList();
+        for (final vault in secondaryVaults) {
+          final ok = await authService.verifySecondaryVaultPIN(vault.id, _pin);
           if (!mounted) return;
-          setState(() {
-            _isLoading = false;
-            switch (result) {
-              case AuthResult.unlocked:
-                _errorMessage = null;
-                _pin = '';
-                _pinNotifier.value = _pin;
-                break;
-              case AuthResult.failed:
-                _pin = '';
-                _pinNotifier.value = _pin;
-                _errorMessage = 'Incorrect PIN';
-                break;
-              case AuthResult.notInitialized:
-                break;
-            }
-          });
-          // Navigate to vault when unlocked (required when this page was pushed e.g. after PIN setup)
-          if (result == AuthResult.unlocked && mounted) {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(
-                builder: (context) => VaultHomePage(vaultId: vaultId),
-              ),
-              (route) => false,
-            );
+          if (ok) {
+            await tamperDetection.resetFailedAttempts();
+            if (mounted) _navigateToVault(vault.id);
+            return;
           }
-        });
+        }
+        await tamperDetection.recordFailedAttempt();
+      }
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _pin = '';
+        _pinNotifier.value = _pin;
+        _errorMessageNotifier.value = 'Incorrect PIN';
       }
     } catch (e) {
       debugPrint('[UnlockPage] Error verifying PIN: $e');
       if (mounted) {
-        Future.microtask(() {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _pin = '';
-              _pinNotifier.value = _pin;
-              _errorMessage = 'Error verifying PIN';
-            });
+        setState(() => _isLoading = false);
+        _pin = '';
+        _pinNotifier.value = _pin;
+        _errorMessageNotifier.value = 'Error verifying PIN';
+      }
+    }
+  }
+
+  Future<void> _verifyPattern(String patternString) async {
+    if (mounted) {
+      setState(() => _isLoading = true);
+      _errorMessageNotifier.value = null;
+    }
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
+      final tamperResult = await tamperDetection.checkTampering();
+      if (tamperResult.isTampered && tamperResult.shouldWipe) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          _errorMessageNotifier.value = 'Security violation detected. Vault has been wiped.';
+        }
+        return;
+      }
+      final result = await authService.verifyPattern(patternString);
+      if (!mounted) return;
+      if (result == AuthResult.unlocked) {
+        await tamperDetection.resetFailedAttempts();
+        if (mounted) _navigateToVault(authService.currentVaultId);
+        return;
+      }
+      // Primary didn't match – try each secondary vault's pattern
+      if (result == AuthResult.failed) {
+        final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+        final secondaryVaults = multiVaultService.vaults.where((v) => !v.isPrimary).toList();
+        for (final vault in secondaryVaults) {
+          final ok = await authService.verifySecondaryVaultPattern(vault.id, patternString);
+          if (!mounted) return;
+          if (ok) {
+            await tamperDetection.resetFailedAttempts();
+            if (mounted) _navigateToVault(vault.id);
+            return;
           }
+        }
+        await tamperDetection.recordFailedAttempt();
+      }
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _patternWrongAttempt = true;
         });
+        _errorMessageNotifier.value = 'Wrong pattern';
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) setState(() => _patternWrongAttempt = false);
+        });
+      }
+    } catch (e) {
+      debugPrint('[UnlockPage] Error verifying pattern: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _errorMessageNotifier.value = 'Error verifying pattern';
       }
     }
   }
@@ -322,6 +308,7 @@ class _UnlockPageState extends State<UnlockPage> {
             final scale = isCompact ? 0.85 : 1.0;
             final padding = isCompact ? 12.0 : 32.0;
             final spacing = isCompact ? 24.0 : 48.0;
+            final usePattern = _unlockMethod == 'pattern';
             return Padding(
               padding: EdgeInsets.all(padding),
               child: Center(
@@ -331,77 +318,7 @@ class _UnlockPageState extends State<UnlockPage> {
                     child: Transform.scale(
                       scale: scale,
                       alignment: Alignment.center,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Enter your PIN',
-                            style: TextStyle(
-                              color: AppTheme.text,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Enter the 6-digit PIN to open your vault',
-                            style: TextStyle(
-                              color: AppTheme.text.withOpacity(0.8),
-                              fontSize: 16,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          SizedBox(height: isCompact ? 16.0 : 32.0),
-                          Container(
-                            padding: EdgeInsets.all(isCompact ? 16.0 : 24),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: AppTheme.surface,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppTheme.accent.withOpacity(0.3),
-                                  blurRadius: 20,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                            child: Icon(
-                              Icons.lock_outline,
-                              size: isCompact ? 40.0 : 48,
-                              color: AppTheme.accent,
-                            ),
-                          ),
-                          SizedBox(height: isCompact ? 16.0 : 32.0),
-                          RepaintBoundary(
-                            child: ValueListenableBuilder<String>(
-                              valueListenable: _pinNotifier,
-                              builder: (context, pin, child) {
-                                return _PINDotsWidget(pinLength: pin.length);
-                              },
-                            ),
-                          ),
-                          if (_errorMessage != null) ...[
-                            const SizedBox(height: 16),
-                            Text(
-                              _errorMessage!,
-                              style: const TextStyle(
-                                color: AppTheme.warning,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                          SizedBox(height: spacing),
-                          _buildPINUnlock(),
-                          if (_isLoading)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 16),
-                              child: CircularProgressIndicator(
-                                color: AppTheme.accent,
-                              ),
-                            ),
-                        ],
-                      ),
+                      child: usePattern ? _buildPatternUnlock() : _buildPINUnlockContent(isCompact, spacing),
                     ),
                   ),
                 ),
@@ -413,6 +330,143 @@ class _UnlockPageState extends State<UnlockPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPatternUnlock() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          'Draw your pattern',
+          style: TextStyle(
+            color: AppTheme.text,
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Draw your pattern to open your vault',
+          style: TextStyle(
+            color: AppTheme.text.withOpacity(0.8),
+            fontSize: 16,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 32),
+        PatternLockWidget(
+          minLength: kPatternMinLength,
+          wrongAttempt: _patternWrongAttempt,
+          onPatternComplete: (indices) {
+            final patternString = patternToString(indices);
+            _verifyPattern(patternString);
+          },
+          onPatternTooShort: () {
+            _errorMessageNotifier.value = 'Use at least 4 dots';
+          },
+        ),
+        ValueListenableBuilder<String?>(
+          valueListenable: _errorMessageNotifier,
+          builder: (context, errorMessage, child) {
+            if (errorMessage == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Text(
+                errorMessage,
+                style: const TextStyle(color: AppTheme.warning, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            );
+          },
+        ),
+        if (_isLoading)
+          const Padding(
+            padding: EdgeInsets.only(top: 16),
+            child: CircularProgressIndicator(color: AppTheme.accent),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPINUnlockContent(bool isCompact, double spacing) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          'Enter your PIN',
+          style: TextStyle(
+            color: AppTheme.text,
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Enter the 6-digit PIN to open your vault',
+          style: TextStyle(
+            color: AppTheme.text.withOpacity(0.8),
+            fontSize: 16,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        SizedBox(height: isCompact ? 16.0 : 32.0),
+        Container(
+          padding: EdgeInsets.all(isCompact ? 16.0 : 24),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppTheme.surface,
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.accent.withOpacity(0.3),
+                blurRadius: 20,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Icon(
+            Icons.lock_outline,
+            size: isCompact ? 40.0 : 48,
+            color: AppTheme.accent,
+          ),
+        ),
+        SizedBox(height: isCompact ? 16.0 : 32.0),
+        RepaintBoundary(
+          child: ValueListenableBuilder<String>(
+            valueListenable: _pinNotifier,
+            builder: (context, pin, child) {
+              return _PINDotsWidget(pinLength: pin.length);
+            },
+          ),
+        ),
+        ValueListenableBuilder<String?>(
+          valueListenable: _errorMessageNotifier,
+          builder: (context, errorMessage, child) {
+            if (errorMessage == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Text(
+                errorMessage,
+                style: const TextStyle(
+                  color: AppTheme.warning,
+                  fontSize: 14,
+                ),
+              ),
+            );
+          },
+        ),
+        SizedBox(height: spacing),
+        _buildPINUnlock(),
+        if (_isLoading)
+          const Padding(
+            padding: EdgeInsets.only(top: 16),
+            child: CircularProgressIndicator(
+              color: AppTheme.accent,
+            ),
+          ),
+      ],
     );
   }
   

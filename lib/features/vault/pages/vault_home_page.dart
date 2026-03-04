@@ -26,6 +26,7 @@ import 'vault_item_detail_page.dart';
 import 'browser_page.dart';
 import 'wifi_transfer_page.dart';
 import 'vault_settings_page.dart';
+import '../../../features/unlock/pages/unlock_page.dart';
 import '../widgets/tutorial_overlay.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -966,7 +967,11 @@ class _VaultHomePageState extends State<VaultHomePage> {
       final navigator = Navigator.of(context, rootNavigator: true);
       await authService.lockVault();
       if (!mounted) return;
-      navigator.popUntil((route) => route.isFirst);
+      // Force navigation to PIN screen so it always shows (no reliance on Consumer rebuild).
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const UnlockPage()),
+        (route) => false,
+      );
     } catch (e, stack) {
       debugPrint('[VaultHomePage] _lockVault error: $e\n$stack');
       if (mounted) {

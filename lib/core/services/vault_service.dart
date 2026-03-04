@@ -414,10 +414,8 @@ class VaultService extends ChangeNotifier {
       rethrow;
     }
     
-    // Initialize iCloud backup directory if backup is enabled
-    if (_useICloudBackup == true && Platform.isIOS) {
-      await _initializeICloudBackup();
-    }
+    // Defer iCloud backup init to background so vault UI can show sooner
+    final doICloudBackup = _useICloudBackup == true && Platform.isIOS;
     
     // Determine vault directory name based on vault type and ID
     String vaultName;
@@ -446,11 +444,20 @@ class VaultService extends ChangeNotifier {
     await _loadAlbums();
     await _loadFolders();
     
-    // Initialize thumbnail cache once (prevents race conditions)
-    await _ensureThumbnailCacheInitialized();
-    
     _isInitialized = true;
     notifyListeners();
+    
+    // Defer heavy work so vault launches faster; run in background
+    unawaited(_ensureThumbnailCacheInitialized().then((_) {
+      debugPrint('[VaultService] Thumbnail cache ready');
+    }).catchError((e) {
+      debugPrint('[VaultService] Thumbnail cache init error: $e');
+    }));
+    if (doICloudBackup) {
+      unawaited(_initializeICloudBackup().catchError((e) {
+        debugPrint('[VaultService] iCloud backup init error: $e');
+      }));
+    }
   }
   
   /// Ensure thumbnail cache is initialized (thread-safe, prevents race conditions)
