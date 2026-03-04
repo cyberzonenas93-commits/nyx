@@ -68,50 +68,53 @@ class _SubscriptionSetupPageState extends State<SubscriptionSetupPage> {
     
     final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
     
-    // Check if user can start trial
-    if (subscriptionService.canStartTrial) {
-      // Start free trial
+    // Always trigger the IAP payment modal so the store manages the subscription
+    // (including any free trial / introductory offer configured in App Store Connect
+    // or Google Play Console). Fall back to a local trial only when IAP products
+    // are unavailable (e.g. running on a simulator during development).
+    if (subscriptionService.products.isEmpty && subscriptionService.canStartTrial) {
       await subscriptionService.startFreeTrial();
       
       if (!mounted) return;
       
-      // Update auth state first
       final authService = Provider.of<AuthService>(context, listen: false);
       await authService.completeOnboarding();
       
       if (!mounted) return;
       
-      // Navigate directly to PIN setup, clearing the navigation stack
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
           builder: (context) => const PinSetupPage(),
         ),
-        (route) => false, // Remove all previous routes
+        (route) => false,
       );
-    } else {
-      // User already used trial - proceed with purchase
-      final success = await subscriptionService.purchaseSubscription(_selectedTier!);
+      return;
+    }
+
+    final success = await subscriptionService.purchaseSubscription(_selectedTier!);
+    
+    if (!mounted) return;
+    
+    setState(() {
+      _isStartingTrial = false;
+    });
+    
+    if (success) {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      await authService.completeOnboarding();
       
       if (!mounted) return;
       
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) => const PinSetupPage(),
+        ),
+        (route) => false,
+      );
+    } else {
       setState(() {
-        _isStartingTrial = false;
+        _errorMessage = 'Failed to start subscription. Please try again.';
       });
-      
-      if (success) {
-        // Update auth state - this will trigger Consumer to rebuild and show correct page
-        final authService = Provider.of<AuthService>(context, listen: false);
-        await authService.completeOnboarding();
-        
-        if (!mounted) return;
-        
-        // Pop this page and let the Consumer in app.dart handle navigation
-        Navigator.of(context).pop();
-      } else {
-        setState(() {
-          _errorMessage = 'Failed to start subscription. Please try again.';
-        });
-      }
     }
   }
   
@@ -499,8 +502,8 @@ class _SubscriptionSetupPageState extends State<SubscriptionSetupPage> {
                 children: [
                   SecureButton(
                     text: _isStartingTrial
-                        ? 'Starting Trial...'
-                        : 'Start Free Trial',
+                        ? 'Processing...'
+                        : 'Subscribe Now',
                     icon: _isStartingTrial ? null : Icons.star,
                     onPressed: _isStartingTrial || _isLoading || products.isEmpty
                         ? null
