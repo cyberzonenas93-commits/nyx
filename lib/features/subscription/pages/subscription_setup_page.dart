@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import '../../../app/theme.dart';
@@ -7,7 +6,6 @@ import '../../../core/models/subscription_tier.dart';
 import '../../../core/services/subscription_service.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../shared/widgets/secure_button.dart';
-import '../../unlock/pages/unlock_method_selection_page.dart';
 import '../../unlock/pages/pin_setup_page.dart';
 
 /// Subscription setup page shown during onboarding
@@ -67,52 +65,45 @@ class _SubscriptionSetupPageState extends State<SubscriptionSetupPage> {
     });
     
     final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    
-    // Check if user can start trial
-    if (subscriptionService.canStartTrial) {
-      // Start free trial
-      await subscriptionService.startFreeTrial();
-      
-      if (!mounted) return;
-      
-      // Update auth state first
-      final authService = Provider.of<AuthService>(context, listen: false);
-      await authService.completeOnboarding();
-      
-      if (!mounted) return;
-      
-      // Navigate directly to PIN setup, clearing the navigation stack
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (context) => const PinSetupPage(),
-        ),
-        (route) => false, // Remove all previous routes
-      );
-    } else {
-      // User already used trial - proceed with purchase
-      final success = await subscriptionService.purchaseSubscription(_selectedTier!);
-      
-      if (!mounted) return;
-      
+
+    // Always start the store purchase flow (free trials are handled by App Store / Google Play).
+    final didLaunchPurchaseFlow = await subscriptionService.purchaseSubscription(_selectedTier!);
+    if (!mounted) return;
+
+    if (!didLaunchPurchaseFlow) {
       setState(() {
         _isStartingTrial = false;
+        _errorMessage = 'Unable to start purchase. Please try again.';
       });
-      
-      if (success) {
-        // Update auth state - this will trigger Consumer to rebuild and show correct page
-        final authService = Provider.of<AuthService>(context, listen: false);
-        await authService.completeOnboarding();
-        
-        if (!mounted) return;
-        
-        // Pop this page and let the Consumer in app.dart handle navigation
-        Navigator.of(context).pop();
-      } else {
-        setState(() {
-          _errorMessage = 'Failed to start subscription. Please try again.';
-        });
-      }
+      return;
     }
+
+    final activated = await subscriptionService.waitForPremiumEntitlement();
+    if (!mounted) return;
+
+    setState(() {
+      _isStartingTrial = false;
+    });
+
+    if (!activated) {
+      setState(() {
+        _errorMessage = 'Purchase not completed. You can try again or continue with the free tier.';
+      });
+      return;
+    }
+
+    // Update auth state first
+    final authService = Provider.of<AuthService>(context, listen: false);
+    await authService.completeOnboarding();
+    if (!mounted) return;
+
+    // Navigate directly to PIN setup, clearing the navigation stack
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => const PinSetupPage(),
+      ),
+      (route) => false, // Remove all previous routes
+    );
   }
   
   Future<void> _skipSubscription() async {

@@ -303,13 +303,43 @@ class SubscriptionService extends ChangeNotifier {
       
       // For auto-renewable subscriptions, use buyNonConsumable
       // The in_app_purchase package handles subscriptions this way
-      await _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
-      
-      // Purchase status will be updated via the purchase stream
-      return true;
+      final didLaunch = await _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
+
+      // Purchase status will be updated via the purchase stream.
+      // `didLaunch` indicates whether the purchase UI flow was started.
+      return didLaunch;
     } catch (e) {
       debugPrint('Purchase error: $e');
       return false;
+    }
+  }
+
+  /// Wait until the user has premium entitlement (active subscription, trial, or God mode).
+  ///
+  /// This is useful for UI flows that should only dismiss after the store confirms purchase.
+  Future<bool> waitForPremiumEntitlement({
+    Duration timeout = const Duration(minutes: 2),
+  }) async {
+    bool hasEntitlement() {
+      if (_godMode) return true;
+      if (isInTrial) return true;
+      return _currentTier.isUnlimited && _status == SubscriptionStatus.active;
+    }
+
+    if (hasEntitlement()) return true;
+
+    final completer = Completer<bool>();
+    void listener() {
+      if (hasEntitlement() && !completer.isCompleted) {
+        completer.complete(true);
+      }
+    }
+
+    addListener(listener);
+    try {
+      return await completer.future.timeout(timeout, onTimeout: () => false);
+    } finally {
+      removeListener(listener);
     }
   }
   

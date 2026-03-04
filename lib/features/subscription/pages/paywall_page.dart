@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -460,56 +459,34 @@ class _PaywallPageState extends State<PaywallPage> {
     });
     
     final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    
-    // Check if user can start free trial
-    if (subscriptionService.canStartTrial) {
-      // Start free trial first
-      await subscriptionService.startFreeTrial();
-      
-      if (!mounted) return;
-      
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Free trial started! Enjoy 7 days of premium access.'),
-          backgroundColor: AppTheme.accent,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-      
+
+    // Always start the store purchase flow (free trials are handled by App Store / Google Play).
+    final didLaunchPurchaseFlow = await subscriptionService.purchaseSubscription(_selectedTier!);
+    if (!mounted) return;
+
+    if (!didLaunchPurchaseFlow) {
       setState(() {
         _isPurchasing = false;
-      });
-      
-      // Close paywall after starting trial
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted && widget.showCloseButton) {
-          Navigator.of(context).pop();
-        }
+        _errorMessage = 'Unable to start purchase. Please try again.';
       });
       return;
     }
-    
-    // User has already used trial, proceed with purchase
-    final success = await subscriptionService.purchaseSubscription(_selectedTier!);
-    
+
+    // Wait for the purchase stream to confirm entitlement before dismissing.
+    final activated = await subscriptionService.waitForPremiumEntitlement();
     if (!mounted) return;
-    
+
     setState(() {
       _isPurchasing = false;
     });
-    
-    if (success) {
-      // Purchase will be handled by subscription service
-      // Close paywall after successful purchase
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted && widget.showCloseButton) {
-          Navigator.of(context).pop();
-        }
-      });
+
+    if (activated) {
+      if (widget.showCloseButton) {
+        Navigator.of(context).pop();
+      }
     } else {
       setState(() {
-        _errorMessage = 'Purchase failed. Please try again.';
+        _errorMessage = 'Purchase not completed. If you already subscribed, tap Restore Purchases.';
       });
     }
   }
@@ -533,13 +510,6 @@ class _PaywallPageState extends State<PaywallPage> {
 class _FeatureList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final features = [
-      'Unlimited storage for photos, videos, and documents',
-      'Priority encryption processing',
-      'All security features included',
-      'Cancel anytime',
-    ];
-    
     return Column(
       children: [
         _FeatureItem(
