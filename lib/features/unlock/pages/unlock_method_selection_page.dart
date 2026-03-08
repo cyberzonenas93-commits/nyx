@@ -1,51 +1,67 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../../app/theme.dart';
 import 'pin_setup_page.dart';
+import 'pattern_setup_page.dart';
 
-/// Screen that redirects directly to PIN setup (pattern unlock removed)
+/// Screen to choose unlock method: PIN or Pattern (first-time setup after onboarding).
 class UnlockMethodSelectionPage extends StatelessWidget {
   const UnlockMethodSelectionPage({super.key});
-  
+
+  void _navigateTo(BuildContext context, Widget page) {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pushReplacement(
+        MaterialPageRoute(builder: (context) => page),
+      );
+    } else {
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => page),
+        (route) => false,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Navigate immediately to PIN setup - don't wait for post-frame callback
-    // This prevents infinite loading issues on macOS
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final navigator = Navigator.of(context);
-      if (!navigator.mounted) return;
-      
-      if (navigator.canPop()) {
-        navigator.pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => const PinSetupPage(),
-          ),
-        );
-      } else {
-        // If we can't pop, use pushAndRemoveUntil to clear the stack
-        navigator.pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => const PinSetupPage(),
-          ),
-          (route) => false,
-        );
-      }
-    });
-    
     return PopScope(
       canPop: false,
-      onPopInvoked: (didPop) async {
-        if (didPop) return;
-        // Allow going back to subscription setup during onboarding
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop();
-        }
-      },
       child: Scaffold(
         backgroundColor: AppTheme.primary,
-        body: const Center(
-          child: CircularProgressIndicator(
-            color: AppTheme.accent,
+        appBar: AppBar(
+          title: const Text('Set up unlock'),
+          backgroundColor: AppTheme.surface,
+          elevation: 0,
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 16),
+                Text(
+                  'Choose how you want to unlock your vault',
+                  style: TextStyle(
+                    color: AppTheme.text.withOpacity(0.8),
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                _MethodOption(
+                  icon: Icons.pin_outlined,
+                  title: 'PIN',
+                  description: '6-digit numeric code',
+                  onTap: () => _navigateTo(context, const PinSetupPage()),
+                ),
+                const SizedBox(height: 12),
+                _MethodOption(
+                  icon: Icons.gesture_outlined,
+                  title: 'Pattern',
+                  description: 'Draw a pattern on the grid',
+                  onTap: () => _navigateTo(context, const PatternSetupPage()),
+                ),
+              ],
+            ),
           ),
         ),
       ),

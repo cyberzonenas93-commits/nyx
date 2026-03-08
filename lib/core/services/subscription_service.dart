@@ -79,6 +79,9 @@ class SubscriptionService extends ChangeNotifier {
   }
   
   Future<void> _initialize() async {
+    // Always load stored state first (God mode, tier, trial) so it persists on relaunch
+    await _loadStoredSubscription();
+
     // Check if in-app purchases are available
     _isAvailable = await _inAppPurchase.isAvailable();
     
@@ -86,9 +89,6 @@ class SubscriptionService extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    
-    // Load purchase history
-    await _loadStoredSubscription();
     
     // Listen for purchase updates
     _subscription = _inAppPurchase.purchaseStream.listen(
@@ -450,6 +450,13 @@ class SubscriptionService extends ChangeNotifier {
     if (isInTrial) {
       return true;
     }
+    return _currentTier.isUnlimited && _status == SubscriptionStatus.active;
+  }
+
+  /// Check if user can create and manage multiple vaults (premium feature)
+  bool get canAccessMultipleVaults {
+    if (_godMode) return true;
+    if (isInTrial) return true;
     return _currentTier.isUnlimited && _status == SubscriptionStatus.active;
   }
 }

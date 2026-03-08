@@ -3,10 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../app/theme.dart';
 import '../../../core/services/auth_service.dart';
+import '../../../core/services/multi_vault_service.dart';
+import '../../../core/models/vault_metadata.dart';
 import '../../../core/services/panic_switch_service.dart';
 import '../../../core/services/tamper_detection_service.dart';
 import '../../../shared/widgets/secure_button.dart';
+import '../../../shared/widgets/pin_verification_dialog.dart';
+import '../../../shared/widgets/pattern_verification_dialog.dart';
 import '../../unlock/pages/pin_setup_page.dart';
+import '../../unlock/pages/pattern_setup_page.dart';
 import '../../unlock/pages/unlock_method_selection_page.dart';
 
 /// Security settings page for PIN configuration
@@ -21,27 +26,15 @@ class _SecurityPageState extends State<SecurityPage> {
   bool _isPanicSwitchEnabled = false;
   bool _isStrictModeEnabled = false;
   String? _unlockMethod;
-  String? _unlockTriggerCode;
-  
+
   @override
   void initState() {
     super.initState();
     _checkUnlockMethod();
-    _loadUnlockTriggerCode();
     _loadPanicSwitchSettings();
     _loadTamperDetectionSettings();
   }
 
-  Future<void> _loadUnlockTriggerCode() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final code = await authService.getUnlockTriggerCode();
-    if (mounted) {
-      setState(() {
-        _unlockTriggerCode = code;
-      });
-    }
-  }
-  
   Future<void> _loadTamperDetectionSettings() async {
     final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
     final enabled = await tamperDetection.isStrictModeEnabled();
@@ -159,6 +152,193 @@ class _SecurityPageState extends State<SecurityPage> {
     }
   }
   
+  Future<void> _changeUnlockMethod() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Unlock method',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.text,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.pin_outlined, color: AppTheme.accent),
+              title: const Text('PIN', style: TextStyle(color: AppTheme.text)),
+              subtitle: Text(
+                '6-digit code',
+                style: TextStyle(color: AppTheme.text.withOpacity(0.6), fontSize: 12),
+              ),
+              onTap: () => Navigator.of(context).pop('pin'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.gesture_outlined, color: AppTheme.accent),
+              title: const Text('Pattern', style: TextStyle(color: AppTheme.text)),
+              subtitle: Text(
+                'Draw a pattern',
+                style: TextStyle(color: AppTheme.text.withOpacity(0.6), fontSize: 12),
+              ),
+              onTap: () => Navigator.of(context).pop('pattern'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || choice == _unlockMethod) return;
+
+    if (choice == 'pin') {
+      if (_unlockMethod == 'pattern') {
+        final verified = await PatternVerificationDialog.show(
+          context,
+          title: 'Verify pattern',
+          message: 'Draw your current pattern to switch to PIN',
+        );
+        if (verified == true && mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => const PinSetupPage(isChangeMethod: true),
+            ),
+          ).then((_) async {
+            if (mounted) {
+              await _checkUnlockMethod();
+              await _setupOtherVaultsForNewMethod('pin');
+            }
+          });
+        }
+      } else {
+        _changePIN();
+      }
+    } else {
+      if (_unlockMethod == 'pin') {
+        final pin = await PinVerificationDialog.show(
+          context,
+          title: 'Verify PIN',
+          message: 'Enter your current PIN to switch to pattern',
+        );
+        if (pin != null && mounted) {
+          final authService = Provider.of<AuthService>(context, listen: false);
+          final result = await authService.verifyPIN(pin);
+          if (result == AuthResult.unlocked && mounted) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const PatternSetupPage(isChangeMethod: true),
+              ),
+            ).then((_) async {
+              if (mounted) {
+                await _checkUnlockMethod();
+                await _setupOtherVaultsForNewMethod('pattern');
+              }
+            });
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Incorrect PIN'),
+                backgroundColor: AppTheme.warning,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        }
+      } else {
+        _changePattern();
+      }
+    }
+  }
+
+  /// After changing primary unlock method, prompt to set the new method for each secondary vault.
+  Future<void> _setupOtherVaultsForNewMethod(String newMethod) async {
+    if (!mounted) return;
+    final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+    final secondaryVaults = multiVaultService.vaults.where((v) => !v.isPrimary).toList();
+    if (secondaryVaults.isEmpty) return;
+
+    final usePattern = newMethod == 'pattern';
+    final methodName = usePattern ? 'pattern' : 'PIN';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: const Text('Set unlock for other vaults', style: TextStyle(color: AppTheme.text)),
+        content: Text(
+          'You have ${secondaryVaults.length} other vault(s). Set up $methodName for each so you can open them.',
+          style: const TextStyle(color: AppTheme.text),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Later'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.accent),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    int done = 0;
+    for (final vault in secondaryVaults) {
+      if (!mounted) break;
+      final page = usePattern
+          ? PatternSetupPage(vaultIdToReset: vault.id)
+          : PinSetupPage(
+              isChangeMethod: false,
+              vaultName: vault.name,
+              vaultTriggerCode: vault.triggerCode,
+              isSecondaryVault: true,
+              isResettingPIN: true,
+              vaultIdToReset: vault.id,
+            );
+      final result = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (context) => page),
+      );
+      if (result == true) done++;
+    }
+
+    if (mounted && done > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            done == secondaryVaults.length
+                ? 'All ${secondaryVaults.length} vault(s) updated.'
+                : 'Updated $done of ${secondaryVaults.length} vault(s). Set the rest in Vault Management.',
+          ),
+          backgroundColor: AppTheme.accent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _changePattern() async {
+    final verified = await PatternVerificationDialog.show(
+      context,
+      title: 'Verify pattern',
+      message: 'Draw your current pattern to set a new one',
+    );
+    if (verified == true && mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => const PatternSetupPage(isChangeMethod: true),
+        ),
+      ).then((_) {
+        if (mounted) _checkUnlockMethod();
+      });
+    }
+  }
+
   Future<void> _changePIN() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -191,46 +371,11 @@ class _SecurityPageState extends State<SecurityPage> {
           builder: (context) => const PinSetupPage(isChangeMethod: true),
         ),
       ).then((_) {
-        _checkUnlockMethod(); // Refresh method after change
+        if (mounted) _checkUnlockMethod();
       });
     }
   }
 
-  Future<void> _changeUnlockTriggerCode() async {
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => _UnlockTriggerCodeDialog(currentCode: _unlockTriggerCode),
-    );
-
-    if (result != null && result.isNotEmpty) {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      final success = await authService.setUnlockTriggerCode(result);
-
-      if (mounted) {
-        if (success) {
-          await _loadUnlockTriggerCode();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Unlock code updated'),
-              backgroundColor: AppTheme.accent,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Invalid code. Code must contain only numbers and cannot start with 0.'),
-              backgroundColor: AppTheme.warning,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  
-  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -355,22 +500,22 @@ class _SecurityPageState extends State<SecurityPage> {
               ),
               
               const Divider(height: 1),
-              
-              // Change PIN
+
+              // Unlock method (PIN or Pattern)
               ListTile(
-                leading: const Icon(
-                  Icons.lock_outline,
+                leading: Icon(
+                  _unlockMethod == 'pattern' ? Icons.gesture_outlined : Icons.lock_outline,
                   color: AppTheme.accent,
                 ),
                 title: const Text(
-                  'Change PIN',
+                  'Unlock method',
                   style: TextStyle(
                     color: AppTheme.text,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 subtitle: Text(
-                  'Update your 6-digit PIN',
+                  _unlockMethod == 'pattern' ? 'Pattern' : 'PIN',
                   style: TextStyle(
                     color: AppTheme.text.withOpacity(0.6),
                     fontSize: 12,
@@ -380,23 +525,28 @@ class _SecurityPageState extends State<SecurityPage> {
                   Icons.chevron_right,
                   color: AppTheme.text.withOpacity(0.4),
                 ),
-                onTap: _changePIN,
+                onTap: _changeUnlockMethod,
               ),
-              
-              const Divider(height: 1),
 
-              // Unlock code (stored for compatibility; main access is via PIN on unlock screen)
+              const Divider(height: 1),
+              
+              // Change PIN (when using PIN) or Change pattern (when using pattern)
               ListTile(
-                leading: const Icon(Icons.vpn_key, color: AppTheme.accent),
+                leading: const Icon(
+                  Icons.lock_outline,
+                  color: AppTheme.accent,
+                ),
                 title: Text(
-                  'Unlock code',
+                  _unlockMethod == 'pattern' ? 'Change pattern' : 'Change PIN',
                   style: const TextStyle(
                     color: AppTheme.text,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 subtitle: Text(
-                  _unlockTriggerCode != null ? 'Current: $_unlockTriggerCode' : 'Optional code (PIN is used on unlock screen)',
+                  _unlockMethod == 'pattern'
+                      ? 'Update your unlock pattern'
+                      : 'Update your 6-digit PIN',
                   style: TextStyle(
                     color: AppTheme.text.withOpacity(0.6),
                     fontSize: 12,
@@ -406,7 +556,7 @@ class _SecurityPageState extends State<SecurityPage> {
                   Icons.chevron_right,
                   color: AppTheme.text.withOpacity(0.4),
                 ),
-                onTap: _changeUnlockTriggerCode,
+                onTap: _unlockMethod == 'pattern' ? _changePattern : _changePIN,
               ),
 
               const Divider(height: 1),
@@ -631,118 +781,6 @@ class _SecurityTip extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _UnlockTriggerCodeDialog extends StatefulWidget {
-  final String? currentCode;
-
-  const _UnlockTriggerCodeDialog({this.currentCode});
-
-  @override
-  State<_UnlockTriggerCodeDialog> createState() => _UnlockTriggerCodeDialogState();
-}
-
-class _UnlockTriggerCodeDialogState extends State<_UnlockTriggerCodeDialog> {
-  final TextEditingController _controller = TextEditingController();
-  String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.currentCode != null) {
-      _controller.text = widget.currentCode!;
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _validateAndSubmit() {
-    final code = _controller.text.trim();
-
-    if (code.isEmpty) {
-      setState(() {
-        _errorMessage = 'Code cannot be empty';
-      });
-      return;
-    }
-
-    if (!RegExp(r'^\d+$').hasMatch(code)) {
-      setState(() {
-        _errorMessage = 'Code must contain only numbers';
-      });
-      return;
-    }
-
-    if (code.startsWith('0')) {
-      setState(() {
-        _errorMessage = 'Code cannot start with 0. Please enter a code that starts with 1-9.';
-      });
-      return;
-    }
-
-    Navigator.of(context).pop(code);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppTheme.surface,
-      title: const Text(
-        'Set unlock code',
-        style: TextStyle(color: AppTheme.text),
-      ),
-      content: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Optional code stored for vault access. Your PIN is used on the unlock screen to open your vault.',
-              style: TextStyle(color: AppTheme.text),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _controller,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: AppTheme.text),
-              decoration: InputDecoration(
-                labelText: 'Trigger Code',
-                labelStyle: TextStyle(color: AppTheme.text.withOpacity(0.7)),
-                hintText: 'e.g., 123456',
-                hintStyle: TextStyle(color: AppTheme.text.withOpacity(0.4)),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.text.withOpacity(0.3)),
-                ),
-                focusedBorder: const OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.accent),
-                ),
-                errorText: _errorMessage,
-              ),
-              autofocus: true,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: _validateAndSubmit,
-          style: TextButton.styleFrom(
-            foregroundColor: AppTheme.accent,
-          ),
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }
