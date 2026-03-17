@@ -1,23 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../app/theme.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/services/multi_vault_service.dart';
-import '../../../core/models/vault_metadata.dart';
 import '../../../core/services/panic_switch_service.dart';
 import '../../../core/services/tamper_detection_service.dart';
-import '../../../shared/widgets/secure_button.dart';
 import '../../../shared/widgets/pin_verification_dialog.dart';
 import '../../../shared/widgets/pattern_verification_dialog.dart';
 import '../../unlock/pages/pin_setup_page.dart';
 import '../../unlock/pages/pattern_setup_page.dart';
-import '../../unlock/pages/unlock_method_selection_page.dart';
 
 /// Security settings page for PIN configuration
 class SecurityPage extends StatefulWidget {
   const SecurityPage({super.key});
-  
+
   @override
   State<SecurityPage> createState() => _SecurityPageState();
 }
@@ -36,7 +32,8 @@ class _SecurityPageState extends State<SecurityPage> {
   }
 
   Future<void> _loadTamperDetectionSettings() async {
-    final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
+    final tamperDetection =
+        Provider.of<TamperDetectionService>(context, listen: false);
     final enabled = await tamperDetection.isStrictModeEnabled();
     if (mounted) {
       setState(() {
@@ -44,8 +41,11 @@ class _SecurityPageState extends State<SecurityPage> {
       });
     }
   }
-  
+
   Future<void> _toggleStrictMode(bool value) async {
+    final tamperDetection =
+        Provider.of<TamperDetectionService>(context, listen: false);
+
     if (value) {
       // Show warning dialog before enabling strict mode
       final confirmed = await showDialog<bool>(
@@ -74,38 +74,37 @@ class _SecurityPageState extends State<SecurityPage> {
           ],
         ),
       );
-      
+
       if (confirmed != true) return;
     }
-    
-    final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
+
     if (value) {
       await tamperDetection.enableStrictMode();
     } else {
       await tamperDetection.disableStrictMode();
     }
-    
-    if (mounted) {
-      setState(() {
-        _isStrictModeEnabled = value;
-      });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value
-                ? 'Strict mode enabled. Vault will be wiped on tampering.'
-                : 'Strict mode disabled.',
-          ),
-          backgroundColor: value ? AppTheme.warning : AppTheme.accent,
-          behavior: SnackBarBehavior.floating,
+
+    if (!mounted) return;
+    setState(() {
+      _isStrictModeEnabled = value;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          value
+              ? 'Strict mode enabled. Vault data will be wiped on tampering.'
+              : 'Strict mode disabled.',
         ),
-      );
-    }
+        backgroundColor: value ? AppTheme.warning : AppTheme.accent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
-  
+
   Future<void> _loadPanicSwitchSettings() async {
-    final panicSwitchService = Provider.of<PanicSwitchService>(context, listen: false);
+    final panicSwitchService =
+        Provider.of<PanicSwitchService>(context, listen: false);
     final enabled = await panicSwitchService.isEnabled();
     if (mounted) {
       setState(() {
@@ -113,33 +112,33 @@ class _SecurityPageState extends State<SecurityPage> {
       });
     }
   }
-  
+
   Future<void> _togglePanicSwitch(bool value) async {
-    final panicSwitchService = Provider.of<PanicSwitchService>(context, listen: false);
-    
+    final panicSwitchService =
+        Provider.of<PanicSwitchService>(context, listen: false);
+
     if (value) {
       await panicSwitchService.enable();
     } else {
       await panicSwitchService.disable();
     }
-    
-    if (mounted) {
-      setState(() {
-        _isPanicSwitchEnabled = value;
-      });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value 
-              ? 'Panic switch enabled. Turn phone face-down to exit app.'
+
+    if (!mounted) return;
+    setState(() {
+      _isPanicSwitchEnabled = value;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          value
+              ? 'Panic switch enabled. Turn phone face-down to exit the app quickly.'
               : 'Panic switch disabled.',
-          ),
-          backgroundColor: AppTheme.accent,
-          behavior: SnackBarBehavior.floating,
         ),
-      );
-    }
+        backgroundColor: AppTheme.accent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _checkUnlockMethod() async {
@@ -151,7 +150,7 @@ class _SecurityPageState extends State<SecurityPage> {
       });
     }
   }
-  
+
   Future<void> _changeUnlockMethod() async {
     final choice = await showModalBottomSheet<String>(
       context: context,
@@ -176,16 +175,20 @@ class _SecurityPageState extends State<SecurityPage> {
               title: const Text('PIN', style: TextStyle(color: AppTheme.text)),
               subtitle: Text(
                 '6-digit code',
-                style: TextStyle(color: AppTheme.text.withOpacity(0.6), fontSize: 12),
+                style: TextStyle(
+                    color: AppTheme.text.withOpacity(0.6), fontSize: 12),
               ),
               onTap: () => Navigator.of(context).pop('pin'),
             ),
             ListTile(
-              leading: const Icon(Icons.gesture_outlined, color: AppTheme.accent),
-              title: const Text('Pattern', style: TextStyle(color: AppTheme.text)),
+              leading:
+                  const Icon(Icons.gesture_outlined, color: AppTheme.accent),
+              title:
+                  const Text('Pattern', style: TextStyle(color: AppTheme.text)),
               subtitle: Text(
                 'Draw a pattern',
-                style: TextStyle(color: AppTheme.text.withOpacity(0.6), fontSize: 12),
+                style: TextStyle(
+                    color: AppTheme.text.withOpacity(0.6), fontSize: 12),
               ),
               onTap: () => Navigator.of(context).pop('pattern'),
             ),
@@ -193,7 +196,7 @@ class _SecurityPageState extends State<SecurityPage> {
         ),
       ),
     );
-    if (choice == null || choice == _unlockMethod) return;
+    if (!mounted || choice == null || choice == _unlockMethod) return;
 
     if (choice == 'pin') {
       if (_unlockMethod == 'pattern') {
@@ -203,11 +206,13 @@ class _SecurityPageState extends State<SecurityPage> {
           message: 'Draw your current pattern to switch to PIN',
         );
         if (verified == true && mounted) {
-          Navigator.of(context).push(
+          Navigator.of(context)
+              .push(
             MaterialPageRoute(
               builder: (context) => const PinSetupPage(isChangeMethod: true),
             ),
-          ).then((_) async {
+          )
+              .then((_) async {
             if (mounted) {
               await _checkUnlockMethod();
               await _setupOtherVaultsForNewMethod('pin');
@@ -228,11 +233,14 @@ class _SecurityPageState extends State<SecurityPage> {
           final authService = Provider.of<AuthService>(context, listen: false);
           final result = await authService.verifyPIN(pin);
           if (result == AuthResult.unlocked && mounted) {
-            Navigator.of(context).push(
+            Navigator.of(context)
+                .push(
               MaterialPageRoute(
-                builder: (context) => const PatternSetupPage(isChangeMethod: true),
+                builder: (context) =>
+                    const PatternSetupPage(isChangeMethod: true),
               ),
-            ).then((_) async {
+            )
+                .then((_) async {
               if (mounted) {
                 await _checkUnlockMethod();
                 await _setupOtherVaultsForNewMethod('pattern');
@@ -257,8 +265,10 @@ class _SecurityPageState extends State<SecurityPage> {
   /// After changing primary unlock method, prompt to set the new method for each secondary vault.
   Future<void> _setupOtherVaultsForNewMethod(String newMethod) async {
     if (!mounted) return;
-    final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
-    final secondaryVaults = multiVaultService.vaults.where((v) => !v.isPrimary).toList();
+    final multiVaultService =
+        Provider.of<MultiVaultService>(context, listen: false);
+    final secondaryVaults =
+        multiVaultService.vaults.where((v) => !v.isPrimary).toList();
     if (secondaryVaults.isEmpty) return;
 
     final usePattern = newMethod == 'pattern';
@@ -268,7 +278,8 @@ class _SecurityPageState extends State<SecurityPage> {
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: AppTheme.surface,
-        title: const Text('Set unlock for other vaults', style: TextStyle(color: AppTheme.text)),
+        title: const Text('Set unlock for other vaults',
+            style: TextStyle(color: AppTheme.text)),
         content: Text(
           'You have ${secondaryVaults.length} other vault(s). Set up $methodName for each so you can open them.',
           style: const TextStyle(color: AppTheme.text),
@@ -329,11 +340,13 @@ class _SecurityPageState extends State<SecurityPage> {
       message: 'Draw your current pattern to set a new one',
     );
     if (verified == true && mounted) {
-      Navigator.of(context).push(
+      Navigator.of(context)
+          .push(
         MaterialPageRoute(
           builder: (context) => const PatternSetupPage(isChangeMethod: true),
         ),
-      ).then((_) {
+      )
+          .then((_) {
         if (mounted) _checkUnlockMethod();
       });
     }
@@ -346,7 +359,7 @@ class _SecurityPageState extends State<SecurityPage> {
         backgroundColor: AppTheme.surface,
         title: const Text('Change PIN?'),
         content: const Text(
-          'You will need to enter a new PIN. Your vault will be re-encrypted with the new PIN.',
+          'You will need to enter a new PIN. Existing vault access will switch to the new PIN.',
           style: TextStyle(color: AppTheme.text),
         ),
         actions: [
@@ -364,13 +377,15 @@ class _SecurityPageState extends State<SecurityPage> {
         ],
       ),
     );
-    
+
     if (confirmed == true && mounted) {
-      Navigator.of(context).push(
+      Navigator.of(context)
+          .push(
         MaterialPageRoute(
           builder: (context) => const PinSetupPage(isChangeMethod: true),
         ),
-      ).then((_) {
+      )
+          .then((_) {
         if (mounted) _checkUnlockMethod();
       });
     }
@@ -414,7 +429,7 @@ class _SecurityPageState extends State<SecurityPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Zero-Knowledge Architecture',
+                                'Local-Only Privacy',
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w600,
@@ -423,7 +438,7 @@ class _SecurityPageState extends State<SecurityPage> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Your data is encrypted on-device. We never see your files.',
+                                'Your files stay on your device, and Nyx does not upload them to our servers.',
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: AppTheme.text.withOpacity(0.7),
@@ -444,42 +459,47 @@ class _SecurityPageState extends State<SecurityPage> {
                     const SizedBox(height: 12),
                     _SecurityPoint(
                       icon: Icons.lock_outline,
-                      title: 'AES-256-GCM Encryption',
-                      description: 'Military-grade encryption for all files',
+                      title: 'Secure Unlock Storage',
+                      description:
+                          'PIN and pattern credentials are stored with platform secure storage',
                     ),
                     const SizedBox(height: 12),
                     _SecurityPoint(
                       icon: Icons.vpn_key_outlined,
-                      title: 'Per-File Encryption Keys',
-                      description: 'Each file has its own unique encryption key',
+                      title: 'Local Vault Storage',
+                      description:
+                          'Imported files stay inside app-managed storage on this device',
                     ),
                     const SizedBox(height: 12),
                     _SecurityPoint(
                       icon: Icons.phone_android_outlined,
                       title: 'On-Device Only',
-                      description: 'All encryption happens locally on your device',
+                      description:
+                          'All encryption happens locally on your device',
                     ),
                     const SizedBox(height: 12),
                     _SecurityPoint(
                       icon: Icons.security,
                       title: 'Tamper Detection',
-                      description: 'Detects debugger, root, and failed unlock attempts',
+                      description:
+                          'Detects debugger, root, and failed unlock attempts',
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Authentication Settings
           _buildSection(
             title: 'Authentication',
             children: [
               // Panic Switch
               SwitchListTile(
-                secondary: const Icon(Icons.flip_camera_android, color: AppTheme.accent),
+                secondary: const Icon(Icons.flip_camera_android,
+                    color: AppTheme.accent),
                 title: const Text(
                   'Panic Switch',
                   style: TextStyle(
@@ -498,13 +518,15 @@ class _SecurityPageState extends State<SecurityPage> {
                 onChanged: _togglePanicSwitch,
                 activeColor: AppTheme.accent,
               ),
-              
+
               const Divider(height: 1),
 
               // Unlock method (PIN or Pattern)
               ListTile(
                 leading: Icon(
-                  _unlockMethod == 'pattern' ? Icons.gesture_outlined : Icons.lock_outline,
+                  _unlockMethod == 'pattern'
+                      ? Icons.gesture_outlined
+                      : Icons.lock_outline,
                   color: AppTheme.accent,
                 ),
                 title: const Text(
@@ -529,7 +551,7 @@ class _SecurityPageState extends State<SecurityPage> {
               ),
 
               const Divider(height: 1),
-              
+
               // Change PIN (when using PIN) or Change pattern (when using pattern)
               ListTile(
                 leading: const Icon(
@@ -562,9 +584,9 @@ class _SecurityPageState extends State<SecurityPage> {
               const Divider(height: 1),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Tamper Detection
           _buildSection(
             title: 'Tamper Detection',
@@ -572,7 +594,8 @@ class _SecurityPageState extends State<SecurityPage> {
               SwitchListTile(
                 secondary: Icon(
                   _isStrictModeEnabled ? Icons.security : Icons.shield_outlined,
-                  color: _isStrictModeEnabled ? AppTheme.warning : AppTheme.accent,
+                  color:
+                      _isStrictModeEnabled ? AppTheme.warning : AppTheme.accent,
                 ),
                 title: Text(
                   'Strict Mode',
@@ -629,9 +652,9 @@ class _SecurityPageState extends State<SecurityPage> {
                 ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Security Tips
           _buildSection(
             title: 'Security Tips',
@@ -639,19 +662,22 @@ class _SecurityPageState extends State<SecurityPage> {
               _SecurityTip(
                 icon: Icons.lock_clock_outlined,
                 title: 'Use a Strong PIN',
-                description: 'Choose a PIN that\'s easy for you to remember but hard for others to guess.',
+                description:
+                    'Choose a PIN that\'s easy for you to remember but hard for others to guess.',
               ),
               const Divider(height: 1),
               _SecurityTip(
                 icon: Icons.visibility_off_outlined,
                 title: 'Keep Your PIN Private',
-                description: 'Never share your PIN with anyone. If someone knows your PIN, they can access your vault.',
+                description:
+                    'Never share your PIN with anyone. If someone knows your PIN, they can access your vault.',
               ),
               const Divider(height: 1),
               _SecurityTip(
                 icon: Icons.backup_outlined,
                 title: 'Remember Your PIN',
-                description: 'If you forget your PIN, your data cannot be recovered. We cannot reset it for you.',
+                description:
+                    'If you forget your PIN, your data cannot be recovered. We cannot reset it for you.',
               ),
             ],
           ),
@@ -659,7 +685,7 @@ class _SecurityPageState extends State<SecurityPage> {
       ),
     );
   }
-  
+
   Widget _buildSection({
     required String title,
     required List<Widget> children,
@@ -694,13 +720,13 @@ class _SecurityPoint extends StatelessWidget {
   final IconData icon;
   final String title;
   final String description;
-  
+
   const _SecurityPoint({
     required this.icon,
     required this.title,
     required this.description,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -739,13 +765,13 @@ class _SecurityTip extends StatelessWidget {
   final IconData icon;
   final String title;
   final String description;
-  
+
   const _SecurityTip({
     required this.icon,
     required this.title,
     required this.description,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Padding(

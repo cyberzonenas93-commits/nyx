@@ -19,7 +19,7 @@ import 'vault_management_page.dart';
 /// Vault settings page accessible from within the vault
 class VaultSettingsPage extends StatefulWidget {
   const VaultSettingsPage({super.key});
-  
+
   @override
   State<VaultSettingsPage> createState() => _VaultSettingsPageState();
 }
@@ -33,7 +33,7 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
           backgroundColor: AppTheme.surface,
           title: const Text('Change PIN?'),
           content: const Text(
-            'You will need to enter your current PIN and then set a new PIN. Your vault will be re-encrypted with the new PIN.',
+            'You will need to enter your current PIN and then set a new PIN for future unlocks.',
             style: TextStyle(color: AppTheme.text),
           ),
           actions: [
@@ -51,22 +51,22 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
           ],
         ),
       );
-      
+
       if (confirmed == true && mounted) {
         // Verify current PIN first
         final verifiedPIN = await PinVerificationDialog.show(context);
-        
+
         if (verifiedPIN == null || verifiedPIN.isEmpty) {
           return; // User cancelled
         }
-        
+
         if (!mounted) return;
-        
+
         final authService = Provider.of<AuthService>(context, listen: false);
         final result = await authService.verifyPIN(verifiedPIN);
-        
+
         if (!mounted) return;
-        
+
         if (result != AuthResult.unlocked) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -77,9 +77,9 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
           );
           return;
         }
-        
+
         if (!mounted) return;
-        
+
         // Navigate to PIN setup page for changing PIN
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -101,8 +101,6 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
     }
   }
 
-
-  
   Future<void> _manageSubscription() async {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -121,7 +119,8 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
       if (item.type != VaultItemType.video) continue;
 
       final existingThumbPath = vaultService.getThumbnailPath(item.id);
-      if (existingThumbPath != null && File(existingThumbPath).existsSync()) continue;
+      if (existingThumbPath != null && File(existingThumbPath).existsSync())
+        continue;
 
       final filePath = vaultService.getFilePath(item.id);
       if (filePath == null) continue;
@@ -130,7 +129,9 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
 
       if (Platform.isIOS) {
         final lower = filePath.toLowerCase();
-        final isCommonContainer = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.m4v');
+        final isCommonContainer = lower.endsWith('.mp4') ||
+            lower.endsWith('.mov') ||
+            lower.endsWith('.m4v');
         if (!isCommonContainer) {
           skippedUnsafe++;
           continue;
@@ -207,7 +208,8 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                   const SizedBox(height: 8),
                   Text(
                     currentName,
-                    style: TextStyle(color: AppTheme.text.withOpacity(0.7), fontSize: 12),
+                    style: TextStyle(
+                        color: AppTheme.text.withOpacity(0.7), fontSize: 12),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -215,7 +217,8 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                     const SizedBox(height: 10),
                     Text(
                       'iOS safe mode: only MP4/MOV/M4V ≤ 300MB.',
-                      style: TextStyle(color: AppTheme.text.withOpacity(0.5), fontSize: 11),
+                      style: TextStyle(
+                          color: AppTheme.text.withOpacity(0.5), fontSize: 11),
                     ),
                   ],
                 ],
@@ -248,14 +251,17 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
       try {
         await vaultService.generateThumbnailForItem(item.id);
       } catch (e) {
-        debugPrint('[VaultSettingsPage] Poster generation failed for ${item.id}: $e');
+        debugPrint(
+            '[VaultSettingsPage] Poster generation failed for ${item.id}: $e');
       }
 
       done++;
       setDialogStateRef?.call(() {});
     }
 
-    if (dialogOpen && dialogContext != null && Navigator.of(dialogContext!).canPop()) {
+    if (dialogOpen &&
+        dialogContext != null &&
+        Navigator.of(dialogContext!).canPop()) {
       Navigator.of(dialogContext!).pop();
     }
 
@@ -272,7 +278,7 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
       ),
     );
   }
-  
+
   Future<void> _wipeData() async {
     // First confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -303,21 +309,21 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
         ],
       ),
     );
-    
+
     if (confirmed != true) return;
-    
+
     // PIN verification
     final verifiedPIN = await PinVerificationDialog.show(context);
-    
+
     if (verifiedPIN == null || verifiedPIN.isEmpty) {
       return; // User cancelled
     }
-    
+
     final authService = Provider.of<AuthService>(context, listen: false);
     final result = await authService.verifyPIN(verifiedPIN);
-    
+
     if (!mounted) return;
-    
+
     if (result != AuthResult.unlocked) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -328,7 +334,7 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
       );
       return;
     }
-    
+
     // Final confirmation
     final finalConfirm = await showDialog<bool>(
       context: context,
@@ -358,9 +364,9 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
         ],
       ),
     );
-    
+
     if (finalConfirm != true) return;
-    
+
     // Show loading indicator
     if (!mounted) return;
     showDialog(
@@ -370,21 +376,21 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
         child: CircularProgressIndicator(color: AppTheme.accent),
       ),
     );
-    
+
     // Wipe all vault data
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final allItems = vaultService.items;
-    
+
     // Delete all items
     for (final item in allItems) {
       await vaultService.deleteItem(item.id);
     }
-    
+
     // Close loading dialog
     if (mounted) {
       Navigator.of(context).pop();
     }
-    
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -394,17 +400,17 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
           duration: Duration(seconds: 3),
         ),
       );
-      
+
       // Pop settings page to return to vault
       Navigator.of(context).pop();
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final subscriptionService = Provider.of<SubscriptionService>(context);
     final currentTier = subscriptionService.currentTier;
-    
+
     return Scaffold(
       backgroundColor: AppTheme.primary,
       appBar: AppBar(
@@ -444,9 +450,7 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                 ),
                 onTap: _changePIN,
               ),
-
               const Divider(height: 1),
-
               ListTile(
                 leading: const Icon(Icons.security, color: AppTheme.accent),
                 title: const Text(
@@ -477,17 +481,19 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
 
           // Multiple Vaults Section (only in primary vault)
           Consumer<MultiVaultService>(
             builder: (context, multiVaultService, _) {
-              final authService = Provider.of<AuthService>(context, listen: false);
+              final authService =
+                  Provider.of<AuthService>(context, listen: false);
               // Show if unlocked and currentVaultId is null (primary vault)
               // currentVaultId is null when in primary vault, non-null for secondary vaults
               final isPrimaryVault =
-                  authService.appState == AppState.unlocked && authService.currentVaultId == null;
+                  authService.appState == AppState.unlocked &&
+                      authService.currentVaultId == null;
 
               if (!isPrimaryVault) {
                 return const SizedBox.shrink();
@@ -500,9 +506,11 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                     children: [
                       Consumer<SubscriptionService>(
                         builder: (context, subscriptionService, _) {
-                          final hasPremium = subscriptionService.canAccessMultipleVaults;
+                          final hasPremium =
+                              subscriptionService.canAccessMultipleVaults;
                           return ListTile(
-                            leading: const Icon(Icons.folder_special, color: AppTheme.accent),
+                            leading: const Icon(Icons.folder_special,
+                                color: AppTheme.accent),
                             title: const Text(
                               'Manage Vaults',
                               style: TextStyle(
@@ -527,14 +535,16 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                               if (!hasPremium) {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (context) => const PaywallPage(showCloseButton: true),
+                                    builder: (context) => const PaywallPage(
+                                        showCloseButton: true),
                                   ),
                                 );
                                 return;
                               }
                               Navigator.of(context).push(
                                 MaterialPageRoute(
-                                  builder: (context) => const VaultManagementPage(),
+                                  builder: (context) =>
+                                      const VaultManagementPage(),
                                 ),
                               );
                             },
@@ -556,7 +566,8 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
               _StorageSettingsTile(),
               const Divider(height: 1),
               ListTile(
-                leading: const Icon(Icons.image_outlined, color: AppTheme.accent),
+                leading:
+                    const Icon(Icons.image_outlined, color: AppTheme.accent),
                 title: const Text(
                   'Generate Video Posters (Safe)',
                   style: TextStyle(
@@ -581,9 +592,9 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Subscription Section
           _buildSection(
             title: 'Subscription',
@@ -635,11 +646,10 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                   ],
                 ),
               ),
-              
               const Divider(height: 1),
-              
               ListTile(
-                leading: const Icon(Icons.card_membership, color: AppTheme.accent),
+                leading:
+                    const Icon(Icons.card_membership, color: AppTheme.accent),
                 title: const Text(
                   'Manage Subscription',
                   style: TextStyle(
@@ -664,9 +674,9 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Danger Zone
           _buildSection(
             title: 'Danger Zone',
@@ -702,7 +712,7 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
       ),
     );
   }
-  
+
   Widget _buildSection({
     required String title,
     required List<Widget> children,
@@ -735,7 +745,7 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
 
 class _StorageSettingsTile extends StatefulWidget {
   const _StorageSettingsTile();
-  
+
   @override
   State<_StorageSettingsTile> createState() => _StorageSettingsTileState();
 }
@@ -743,13 +753,13 @@ class _StorageSettingsTile extends StatefulWidget {
 class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   bool? _useICloudStorage;
   bool _isLoading = true;
-  
+
   @override
   void initState() {
     super.initState();
     _loadStoragePreference();
   }
-  
+
   Future<void> _loadStoragePreference() async {
     try {
       final vaultService = Provider.of<VaultService>(context, listen: false);
@@ -770,7 +780,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       }
     }
   }
-  
+
   String _getStorageSubtitle() {
     if (Platform.isAndroid) {
       return 'Local storage (Android)';
@@ -783,22 +793,22 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       return 'Local storage only';
     }
   }
-  
+
   bool _isStorageSelectionAvailable() {
     // Storage selection only available on iOS/macOS
     return Platform.isIOS || Platform.isMacOS;
   }
-  
+
   Future<void> _showStorageDialog() async {
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => _StorageSelectionDialog(
         currentPreference: _useICloudStorage,
       ),
     );
-    
+
     if (result != null && mounted) {
       bool? newPreference;
       if (result == 'icloud') {
@@ -808,13 +818,13 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       } else {
         newPreference = null; // auto-detect
       }
-      
+
       await vaultService.setStoragePreference(newPreference);
-      
+
       setState(() {
         _useICloudStorage = newPreference;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -828,7 +838,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     // Add timeout to prevent infinite loading
@@ -842,7 +852,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
           });
         }
       });
-      
+
       return const ListTile(
         leading: CircularProgressIndicator(
           color: AppTheme.accent,
@@ -851,7 +861,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
         title: Text('Loading storage settings...'),
       );
     }
-    
+
     return ListTile(
       leading: const Icon(Icons.storage, color: AppTheme.accent),
       title: const Text(
@@ -881,11 +891,11 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
 
 class _StorageSelectionDialog extends StatelessWidget {
   final bool? currentPreference;
-  
+
   const _StorageSelectionDialog({
     required this.currentPreference,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -905,7 +915,8 @@ class _StorageSelectionDialog extends StatelessWidget {
           children: [
             _StorageOption(
               title: 'Local + iCloud Backup',
-              description: 'Files stored locally for fast access. Automatically backed up to iCloud in the background. Best of both worlds: performance and backup protection.',
+              description:
+                  'Files stored locally for fast access. Automatically backed up to iCloud in the background. Best of both worlds: performance and backup protection.',
               icon: Icons.cloud_sync,
               isSelected: currentPreference == true,
               onTap: () => Navigator.of(context).pop('icloud'),
@@ -913,7 +924,8 @@ class _StorageSelectionDialog extends StatelessWidget {
             const SizedBox(height: 12),
             _StorageOption(
               title: 'Local Only',
-              description: 'Fastest performance with local storage only. No iCloud backup. If your device is lost or damaged, your data cannot be recovered.',
+              description:
+                  'Fastest performance with local storage only. No iCloud backup. If your device is lost or damaged, your data cannot be recovered.',
               icon: Icons.phone_iphone,
               isSelected: currentPreference == false,
               onTap: () => Navigator.of(context).pop('local'),
@@ -921,7 +933,8 @@ class _StorageSelectionDialog extends StatelessWidget {
             const SizedBox(height: 12),
             _StorageOption(
               title: 'Auto (Recommended)',
-              description: 'Local storage with automatic iCloud backup if available. Optimal performance with backup protection. This is the default setting.',
+              description:
+                  'Local storage with automatic iCloud backup if available. Optimal performance with backup protection. This is the default setting.',
               icon: Icons.auto_awesome,
               isSelected: currentPreference == null,
               onTap: () => Navigator.of(context).pop('auto'),
@@ -972,7 +985,7 @@ class _StorageOption extends StatelessWidget {
   final IconData icon;
   final bool isSelected;
   final VoidCallback onTap;
-  
+
   const _StorageOption({
     required this.title,
     required this.description,
@@ -980,7 +993,7 @@ class _StorageOption extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -990,17 +1003,21 @@ class _StorageOption extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           border: Border.all(
-            color: isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.2),
+            color:
+                isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.2),
             width: isSelected ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
-          color: isSelected ? AppTheme.accent.withOpacity(0.1) : Colors.transparent,
+          color: isSelected
+              ? AppTheme.accent.withOpacity(0.1)
+              : Colors.transparent,
         ),
         child: Row(
           children: [
             Icon(
               icon,
-              color: isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.6),
+              color:
+                  isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.6),
               size: 32,
             ),
             const SizedBox(width: 16),
@@ -1012,7 +1029,8 @@ class _StorageOption extends StatelessWidget {
                     title,
                     style: TextStyle(
                       color: AppTheme.text,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w500,
                       fontSize: 16,
                     ),
                   ),

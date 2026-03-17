@@ -9,45 +9,45 @@ import 'auth_service.dart';
 class TamperDetectionService {
   final AuthService _authService;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
-  
+
   bool _strictModeEnabled = false;
   int _failedAttempts = 0;
   static const int maxFailedAttempts = 5;
-  
+
   TamperDetectionService(this._authService);
-  
+
   /// Check if strict mode is enabled
   Future<bool> isStrictModeEnabled() async {
     final enabled = await _secureStorage.read(key: 'tamper_strict_mode');
     _strictModeEnabled = enabled == 'true';
     return _strictModeEnabled;
   }
-  
+
   /// Enable strict mode (requires explicit confirmation)
   Future<void> enableStrictMode() async {
     await _secureStorage.write(key: 'tamper_strict_mode', value: 'true');
     _strictModeEnabled = true;
   }
-  
+
   /// Disable strict mode
   Future<void> disableStrictMode() async {
     await _secureStorage.write(key: 'tamper_strict_mode', value: 'false');
     _strictModeEnabled = false;
   }
-  
+
   /// Check for tampering conditions
   Future<TamperResult> checkTampering() async {
     final strictMode = await isStrictModeEnabled();
-    
+
     // Check for debugger attachment (simplified - would need platform channels)
     final hasDebugger = await _checkDebugger();
-    
+
     // Check for root/jailbreak (simplified - would need platform channels)
     final isRooted = await _checkRoot();
-    
+
     // Check for failed unlock attempts
     final tooManyFailures = _failedAttempts >= maxFailedAttempts;
-    
+
     if (strictMode) {
       // Strict mode: Any tampering triggers wipe
       if (hasDebugger || isRooted || tooManyFailures) {
@@ -67,29 +67,30 @@ class TamperDetectionService {
         );
       }
     }
-    
+
     return TamperResult(
       isTampered: false,
       reason: null,
       shouldWipe: false,
     );
   }
-  
+
   /// Record a failed unlock attempt
-  Future<void> recordFailedAttempt() async {
+  Future<TamperResult> recordFailedAttempt() async {
     _failedAttempts++;
     await _secureStorage.write(
       key: 'failed_unlock_attempts',
       value: _failedAttempts.toString(),
     );
-    
+
     // Check if we should trigger tamper response
     final result = await checkTampering();
     if (result.shouldWipe) {
       await _wipeVault();
     }
+    return result;
   }
-  
+
   /// Reset failed attempts (on successful unlock)
   Future<void> resetFailedAttempts() async {
     _failedAttempts = 0;
@@ -98,24 +99,40 @@ class TamperDetectionService {
       value: '0',
     );
   }
-  
+
   /// Perform irreversible data wipe (strict mode only)
   Future<void> _wipeVault() async {
     debugPrint('[TamperDetection] Wiping data due to tampering');
-    
+
     try {
+      _failedAttempts = 0;
+      await _authService.lockVault();
+
       // Clear all secure storage
       await _secureStorage.deleteAll();
-      
+
       // Delete app data directories
       final appDir = await getApplicationDocumentsDirectory();
-      
-      // Delete messages directory if it exists
-      final messagesDir = Directory('${appDir.path}/messages');
-      if (await messagesDir.exists()) {
-        await messagesDir.delete(recursive: true);
+
+      await for (final entity in appDir.list(followLinks: false)) {
+        final name = entity.path.split(Platform.pathSeparator).last;
+        final shouldDelete = name == 'messages' ||
+            name == 'vault' ||
+            name.startsWith('vault_') ||
+            name == 'vault_backup' ||
+            name.endsWith('_backup');
+
+        if (!shouldDelete) {
+          continue;
+        }
+
+        if (entity is Directory) {
+          await entity.delete(recursive: true);
+        } else if (entity is File) {
+          await entity.delete();
+        }
       }
-      
+
       // Reset app state
       // Note: This would typically require app restart
       debugPrint('[TamperDetection] Data wiped successfully');
@@ -123,7 +140,7 @@ class TamperDetectionService {
       debugPrint('[TamperDetection] Error wiping data: $e');
     }
   }
-  
+
   /// Check for debugger attachment (simplified)
   /// In production, use platform channels for proper detection
   Future<bool> _checkDebugger() async {
@@ -132,7 +149,7 @@ class TamperDetectionService {
     // iOS: ptrace(PT_DENY_ATTACH, 0, 0, 0)
     return false; // Placeholder
   }
-  
+
   /// Check for root/jailbreak (simplified)
   /// In production, use platform channels for proper detection
   Future<bool> _checkRoot() async {
@@ -141,16 +158,17 @@ class TamperDetectionService {
     // iOS: Check for jailbreak indicators
     return false; // Placeholder
   }
-  
+
   /// Get tamper reason string
-  String _getTamperReason(bool hasDebugger, bool isRooted, bool tooManyFailures) {
+  String _getTamperReason(
+      bool hasDebugger, bool isRooted, bool tooManyFailures) {
     final reasons = <String>[];
     if (hasDebugger) reasons.add('Debugger detected');
     if (isRooted) reasons.add('Root/jailbreak detected');
     if (tooManyFailures) reasons.add('Too many failed attempts');
     return reasons.join(', ');
   }
-  
+
   /// Load failed attempts from storage
   Future<void> loadFailedAttempts() async {
     final attempts = await _secureStorage.read(key: 'failed_unlock_attempts');
@@ -163,7 +181,7 @@ class TamperResult {
   final bool isTampered;
   final String? reason;
   final bool shouldWipe;
-  
+
   TamperResult({
     required this.isTampered,
     this.reason,

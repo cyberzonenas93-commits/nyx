@@ -15,7 +15,7 @@ import 'vault_home_page.dart';
 /// Page for managing multiple vaults (only accessible from primary vault)
 class VaultManagementPage extends StatefulWidget {
   const VaultManagementPage({super.key});
-  
+
   @override
   State<VaultManagementPage> createState() => _VaultManagementPageState();
 }
@@ -25,13 +25,13 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
   bool _isVerifying = false;
   String? _errorMessage;
   bool _hasShownDialog = false;
-  
+
   @override
   void initState() {
     super.initState();
     // Don't show dialog in initState - wait for didChangeDependencies
   }
-  
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -46,7 +46,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       });
     }
   }
-  
+
   Future<void> _verifyPrimaryVaultPIN() async {
     try {
       if (mounted) {
@@ -96,7 +96,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
 
       if (!mounted) return;
       final result = await authService.verifyPIN(verifiedPIN);
-      
+
       if (!mounted) return;
       if (result == AuthResult.unlocked) {
         setState(() {
@@ -128,7 +128,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -156,13 +156,14 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                   builder: (context, multiVaultService, _) {
                     if (!multiVaultService.isInitialized) {
                       return const Center(
-                        child: CircularProgressIndicator(color: AppTheme.accent),
+                        child:
+                            CircularProgressIndicator(color: AppTheme.accent),
                       );
                     }
-                    
+
                     final vaults = multiVaultService.vaults;
                     final primaryVault = multiVaultService.primaryVault;
-          
+
                     return ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
@@ -171,7 +172,8 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: AppTheme.accent.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(AppTheme.radius),
+                            borderRadius:
+                                BorderRadius.circular(AppTheme.radius),
                             border: Border.all(
                               color: AppTheme.accent.withOpacity(0.3),
                             ),
@@ -199,7 +201,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'Create separate vaults with different trigger codes and PINs. Each vault is completely independent and encrypted separately.',
+                                'Create separate vaults with different trigger codes and unlock credentials. Each vault has its own isolated storage area and settings.',
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: AppTheme.text.withOpacity(0.8),
@@ -218,21 +220,22 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                             ],
                           ),
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // All Vaults with Full Details
                         FutureBuilder<Map<String, Map<String, String?>>>(
                           future: _loadAllVaultDetails(multiVaultService),
                           builder: (context, snapshot) {
                             if (!snapshot.hasData) {
                               return const Center(
-                                child: CircularProgressIndicator(color: AppTheme.accent),
+                                child: CircularProgressIndicator(
+                                    color: AppTheme.accent),
                               );
                             }
-                            
+
                             final vaultDetails = snapshot.data!;
-                            
+
                             return Column(
                               children: [
                                 // Primary Vault
@@ -243,18 +246,21 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                                       _VaultDetailTile(
                                         vault: primaryVault,
                                         isPrimary: true,
-                                        details: vaultDetails[primaryVault.id] ?? {},
+                                        details:
+                                            vaultDetails[primaryVault.id] ?? {},
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 24),
                                 ],
-                                
+
                                 // Secondary Vaults
                                 _buildSection(
                                   title: 'Secondary Vaults',
                                   children: [
-                                    if (vaults.where((v) => !v.isPrimary).isEmpty)
+                                    if (vaults
+                                        .where((v) => !v.isPrimary)
+                                        .isEmpty)
                                       Padding(
                                         padding: const EdgeInsets.all(24),
                                         child: Center(
@@ -263,14 +269,16 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                                               Icon(
                                                 Icons.folder_outlined,
                                                 size: 48,
-                                                color: AppTheme.text.withOpacity(0.4),
+                                                color: AppTheme.text
+                                                    .withOpacity(0.4),
                                               ),
                                               const SizedBox(height: 16),
                                               Text(
                                                 'No secondary vaults yet',
                                                 style: TextStyle(
                                                   fontSize: 16,
-                                                  color: AppTheme.text.withOpacity(0.6),
+                                                  color: AppTheme.text
+                                                      .withOpacity(0.6),
                                                 ),
                                               ),
                                               const SizedBox(height: 8),
@@ -278,7 +286,8 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                                                 'Create a new vault to get started',
                                                 style: TextStyle(
                                                   fontSize: 14,
-                                                  color: AppTheme.text.withOpacity(0.5),
+                                                  color: AppTheme.text
+                                                      .withOpacity(0.5),
                                                 ),
                                               ),
                                             ],
@@ -286,23 +295,32 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                                         ),
                                       )
                                     else
-                                      ...vaults.where((v) => !v.isPrimary).map((vault) => _VaultDetailTile(
-                                        vault: vault,
-                                        isPrimary: false,
-                                        details: vaultDetails[vault.id] ?? {},
-                                        onOpen: () => _openSecondaryVault(context, vault),
-                                        onDelete: () => _deleteVault(context, vault),
-                                        onResetPIN: () => _resetSecondaryVaultPIN(context, vault),
-                                      )),
+                                      ...vaults
+                                          .where((v) => !v.isPrimary)
+                                          .map((vault) => _VaultDetailTile(
+                                                vault: vault,
+                                                isPrimary: false,
+                                                details:
+                                                    vaultDetails[vault.id] ??
+                                                        {},
+                                                onOpen: () =>
+                                                    _openSecondaryVault(
+                                                        context, vault),
+                                                onDelete: () => _deleteVault(
+                                                    context, vault),
+                                                onResetPIN: () =>
+                                                    _resetSecondaryVaultPIN(
+                                                        context, vault),
+                                              )),
                                   ],
                                 ),
                               ],
                             );
                           },
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // Create New Vault Button
                         if (vaults.length < multiVaultService.maxVaults)
                           ElevatedButton.icon(
@@ -320,7 +338,8 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               color: AppTheme.warning.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(AppTheme.radius),
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radius),
                             ),
                             child: Row(
                               children: [
@@ -348,7 +367,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                 ),
     );
   }
-  
+
   Widget _buildAuthenticationPrompt() {
     return Center(
       child: Padding(
@@ -390,7 +409,8 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.error_outline, color: AppTheme.warning, size: 20),
+                    Icon(Icons.error_outline,
+                        color: AppTheme.warning, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -410,7 +430,8 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.accent,
                 foregroundColor: AppTheme.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               ),
             ),
           ],
@@ -418,7 +439,7 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       ),
     );
   }
-  
+
   Widget _buildSection({
     required String title,
     required List<Widget> children,
@@ -447,51 +468,58 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       ],
     );
   }
-  
+
   /// Load all vault details (trigger codes and PINs) from secure storage
-  Future<Map<String, Map<String, String?>>> _loadAllVaultDetails(MultiVaultService multiVaultService) async {
+  Future<Map<String, Map<String, String?>>> _loadAllVaultDetails(
+      MultiVaultService multiVaultService) async {
     final secureStorage = const FlutterSecureStorage();
     final authService = Provider.of<AuthService>(context, listen: false);
     final Map<String, Map<String, String?>> details = {};
-    
+
     // Get primary vault trigger code
     final primaryTriggerCode = await authService.getUnlockTriggerCode();
-    
+
     // Get primary vault PIN (we can't retrieve the actual PIN, but we can show that it's set)
     final primaryPinHash = await secureStorage.read(key: 'pin_hash');
     final primaryPinSalt = await secureStorage.read(key: 'pin_salt');
-    
+
     // Get primary vault details
     final primaryVault = multiVaultService.primaryVault;
     if (primaryVault != null) {
       details[primaryVault.id] = {
         'triggerCode': primaryTriggerCode ?? 'Not set',
-        'vaultCode': primaryPinHash != null && primaryPinSalt != null ? 'Set' : 'Not set',
-        'vaultCodeNote': primaryPinHash != null && primaryPinSalt != null 
-            ? 'PIN is set (cannot display for security)' 
+        'vaultCode': primaryPinHash != null && primaryPinSalt != null
+            ? 'Set'
+            : 'Not set',
+        'vaultCodeNote': primaryPinHash != null && primaryPinSalt != null
+            ? 'PIN is set (cannot display for security)'
             : 'PIN not set',
       };
     }
-    
+
     // Get secondary vault details
     for (final vault in multiVaultService.vaults.where((v) => !v.isPrimary)) {
-      final recoveryInfo = await multiVaultService.getRecoveryInfo(vault.id, secureStorage: secureStorage);
+      final recoveryInfo = await multiVaultService.getRecoveryInfo(vault.id,
+          secureStorage: secureStorage);
       final usesPattern = await multiVaultService.vaultUsesPattern(vault.id);
-      final hasPIN = recoveryInfo['pinHash'] != null && recoveryInfo['pinSalt'] != null;
+      final hasPIN =
+          recoveryInfo['pinHash'] != null && recoveryInfo['pinSalt'] != null;
       final hasPattern = usesPattern;
       details[vault.id] = {
         'triggerCode': recoveryInfo['triggerCode'] ?? 'Not set',
         'vaultCode': (hasPIN || hasPattern) ? 'Set' : 'Not set',
         'vaultCodeNote': hasPattern
             ? 'Pattern is set (cannot display for security)'
-            : (hasPIN ? 'PIN is set (cannot display for security)' : 'PIN not set'),
+            : (hasPIN
+                ? 'PIN is set (cannot display for security)'
+                : 'PIN not set'),
         'usesPattern': hasPattern ? 'true' : 'false',
       };
     }
-    
+
     return details;
   }
-  
+
   Future<void> _createNewVault(BuildContext context) async {
     // Navigate to vault creation page (PIN verification already done at page level)
     if (mounted) {
@@ -502,10 +530,12 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       );
     }
   }
-  
-  Future<void> _resetSecondaryVaultPIN(BuildContext context, VaultMetadata vault) async {
+
+  Future<void> _resetSecondaryVaultPIN(
+      BuildContext context, VaultMetadata vault) async {
     final authService = Provider.of<AuthService>(context, listen: false);
-    final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+    final multiVaultService =
+        Provider.of<MultiVaultService>(context, listen: false);
     final usesPattern = await multiVaultService.vaultUsesPattern(vault.id);
     final primaryMethod = await authService.getUnlockMethod();
 
@@ -528,7 +558,9 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       if (result != AuthResult.unlocked) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Incorrect PIN'), backgroundColor: AppTheme.warning),
+            const SnackBar(
+                content: Text('Incorrect PIN'),
+                backgroundColor: AppTheme.warning),
           );
         }
         return;
@@ -577,9 +609,11 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
               isResettingPIN: true,
               vaultIdToReset: vault.id,
             );
-      Navigator.of(context).push(
+      Navigator.of(context)
+          .push(
         MaterialPageRoute(builder: (context) => page),
-      ).then((result) {
+      )
+          .then((result) {
         if (mounted && result == true) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -596,9 +630,11 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
       });
     }
   }
-  
-  Future<void> _openSecondaryVault(BuildContext context, VaultMetadata vault) async {
-    final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+
+  Future<void> _openSecondaryVault(
+      BuildContext context, VaultMetadata vault) async {
+    final multiVaultService =
+        Provider.of<MultiVaultService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
     final usesPattern = await multiVaultService.vaultUsesPattern(vault.id);
 
@@ -617,7 +653,8 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
         message: 'Enter the PIN for this vault',
       );
       if (verifiedPIN == null || verifiedPIN.isEmpty || !mounted) return;
-      final ok = await authService.verifySecondaryVaultPIN(vault.id, verifiedPIN);
+      final ok =
+          await authService.verifySecondaryVaultPIN(vault.id, verifiedPIN);
       if (!mounted) return;
       if (ok != true) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -674,12 +711,14 @@ class _VaultManagementPageState extends State<VaultManagementPage> {
         ],
       ),
     );
-    
+
     if (confirmed == true && mounted) {
-      final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
+      final multiVaultService =
+          Provider.of<MultiVaultService>(context, listen: false);
       final secureStorage = const FlutterSecureStorage();
       try {
-        await multiVaultService.deleteVault(vault.id, secureStorage: secureStorage);
+        await multiVaultService.deleteVault(vault.id,
+            secureStorage: secureStorage);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -709,7 +748,7 @@ class _VaultDetailTile extends StatelessWidget {
   final VoidCallback? onOpen;
   final VoidCallback? onDelete;
   final VoidCallback? onResetPIN;
-  
+
   const _VaultDetailTile({
     required this.vault,
     required this.isPrimary,
@@ -718,7 +757,7 @@ class _VaultDetailTile extends StatelessWidget {
     this.onDelete,
     this.onResetPIN,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -741,7 +780,8 @@ class _VaultDetailTile extends StatelessWidget {
               ),
               if (isPrimary)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: AppTheme.accent.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(4),
@@ -757,7 +797,8 @@ class _VaultDetailTile extends StatelessWidget {
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: AppTheme.text.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(4),
@@ -796,9 +837,11 @@ class _VaultDetailTile extends StatelessWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline, size: 20, color: AppTheme.warning),
+                          Icon(Icons.delete_outline,
+                              size: 20, color: AppTheme.warning),
                           SizedBox(width: 8),
-                          Text('Delete Vault', style: TextStyle(color: AppTheme.warning)),
+                          Text('Delete Vault',
+                              style: TextStyle(color: AppTheme.warning)),
                         ],
                       ),
                     ),
@@ -847,17 +890,22 @@ class _VaultDetailTile extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (!isPrimary && details['vaultCode'] == 'Set' && onResetPIN != null) ...[
+                  if (!isPrimary &&
+                      details['vaultCode'] == 'Set' &&
+                      onResetPIN != null) ...[
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         onPressed: onResetPIN,
                         icon: const Icon(Icons.lock_reset, size: 18),
-                        label: Text(details['usesPattern'] == 'true' ? 'Reset pattern' : 'Reset PIN'),
+                        label: Text(details['usesPattern'] == 'true'
+                            ? 'Reset pattern'
+                            : 'Reset PIN'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.accent,
-                          side: BorderSide(color: AppTheme.accent.withOpacity(0.5)),
+                          side: BorderSide(
+                              color: AppTheme.accent.withOpacity(0.5)),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                       ),
@@ -902,7 +950,7 @@ class _VaultDetailTile extends StatelessWidget {
       ],
     );
   }
-  
+
   String _formatDate(DateTime date) {
     return '${date.month}/${date.day}/${date.year}';
   }
@@ -914,7 +962,7 @@ class _DetailField extends StatelessWidget {
   final IconData icon;
   final String? note;
   final bool isImportant;
-  
+
   const _DetailField({
     required this.label,
     required this.value,
@@ -922,7 +970,7 @@ class _DetailField extends StatelessWidget {
     this.note,
     this.isImportant = false,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -995,7 +1043,7 @@ class _DetailField extends StatelessWidget {
 /// Page for creating a new vault
 class VaultCreationPage extends StatefulWidget {
   const VaultCreationPage({super.key});
-  
+
   @override
   State<VaultCreationPage> createState() => _VaultCreationPageState();
 }
@@ -1004,19 +1052,19 @@ class _VaultCreationPageState extends State<VaultCreationPage> {
   final _nameController = TextEditingController();
   String? _errorMessage;
   bool _isCreating = false;
-  
+
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
   }
-  
+
   /// Generate a numeric trigger code for the vault (no leading zero).
   String _generateTriggerCode() {
     final r = DateTime.now().millisecondsSinceEpoch % 1000000;
     return (100000 + r).toString();
   }
-  
+
   Future<void> _createVault() async {
     final name = _nameController.text.trim();
 
@@ -1050,11 +1098,13 @@ class _VaultCreationPageState extends State<VaultCreationPage> {
             vaultTriggerCode: triggerCode,
             isSecondaryVault: true,
           );
-    Navigator.of(context).push(
+    Navigator.of(context)
+        .push(
       MaterialPageRoute(
         builder: (context) => page,
       ),
-    ).then((result) {
+    )
+        .then((result) {
       if (mounted) {
         if (result == true) {
           Navigator.of(context).pop(true);
@@ -1066,7 +1116,7 @@ class _VaultCreationPageState extends State<VaultCreationPage> {
       }
     });
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(

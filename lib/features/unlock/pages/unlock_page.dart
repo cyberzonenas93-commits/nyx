@@ -22,53 +22,57 @@ class _BackspaceIntent extends Intent {
 /// Unlock screen with PIN pad
 class UnlockPage extends StatefulWidget {
   const UnlockPage({super.key});
-  
+
   @override
   State<UnlockPage> createState() => _UnlockPageState();
 }
 
 class _UnlockPageState extends State<UnlockPage> {
   final ValueNotifier<String> _pinNotifier = ValueNotifier<String>('');
-  final ValueNotifier<String?> _errorMessageNotifier = ValueNotifier<String?>(null);
+  final ValueNotifier<String?> _errorMessageNotifier =
+      ValueNotifier<String?>(null);
   String _pin = '';
   bool _isLoading = false;
   String? _unlockMethod;
   bool _patternWrongAttempt = false;
-  
+
   @override
   void initState() {
     super.initState();
     _checkUnlockMethod();
   }
-  
+
   @override
   void dispose() {
     _pinNotifier.dispose();
     _errorMessageNotifier.dispose();
     super.dispose();
   }
-  
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (_isLoading) return KeyEventResult.ignored;
-    
+
     if (event is KeyDownEvent) {
       final key = event.logicalKey;
-      
+
       // Handle numeric keys (0-9)
-      if (key.keyLabel.length == 1 && key.keyLabel.codeUnitAt(0) >= 48 && key.keyLabel.codeUnitAt(0) <= 57) {
+      if (key.keyLabel.length == 1 &&
+          key.keyLabel.codeUnitAt(0) >= 48 &&
+          key.keyLabel.codeUnitAt(0) <= 57) {
         final number = key.keyLabel;
         _onNumberPressed(number);
         return KeyEventResult.handled;
       }
       // Handle backspace/delete
-      else if (key == LogicalKeyboardKey.backspace || key == LogicalKeyboardKey.delete) {
+      else if (key == LogicalKeyboardKey.backspace ||
+          key == LogicalKeyboardKey.delete) {
         _onBackspace();
         return KeyEventResult.handled;
       }
     }
     return KeyEventResult.ignored;
   }
-  
+
   Future<void> _checkUnlockMethod() async {
     final authService = Provider.of<AuthService>(context, listen: false);
     final method = await authService.getUnlockMethod();
@@ -78,33 +82,34 @@ class _UnlockPageState extends State<UnlockPage> {
       });
     }
   }
-  
+
   void _onNumberPressed(String number) {
     if (_pin.length >= 6) return;
-    
+
     if (_pin.isEmpty && number == '0') {
-      _errorMessageNotifier.value = 'PIN cannot start with 0. Please enter a number from 1-9 first.';
+      _errorMessageNotifier.value =
+          'PIN cannot start with 0. Please enter a number from 1-9 first.';
       return;
     }
-    
+
     _pin += number;
     _pinNotifier.value = _pin;
     if (_errorMessageNotifier.value != null) _errorMessageNotifier.value = null;
-    
+
     if (_pin.length == 6) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _verifyPIN();
       });
     }
   }
-  
+
   void _onBackspace() {
     if (_pin.isEmpty) return;
     _pin = _pin.substring(0, _pin.length - 1);
     _pinNotifier.value = _pin;
     if (_errorMessageNotifier.value != null) _errorMessageNotifier.value = null;
   }
-  
+
   Future<void> _setupVault(String pin) async {
     if (mounted) {
       setState(() => _isLoading = true);
@@ -130,7 +135,7 @@ class _UnlockPageState extends State<UnlockPage> {
       }
     }
   }
-  
+
   void _navigateToVault(String? vaultId) {
     setState(() => _isLoading = false);
     _errorMessageNotifier.value = null;
@@ -151,12 +156,14 @@ class _UnlockPageState extends State<UnlockPage> {
     }
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
+      final tamperDetection =
+          Provider.of<TamperDetectionService>(context, listen: false);
       final tamperResult = await tamperDetection.checkTampering();
       if (tamperResult.isTampered && tamperResult.shouldWipe) {
         if (mounted) {
           setState(() => _isLoading = false);
-          _errorMessageNotifier.value = 'Security violation detected. Vault has been wiped.';
+          _errorMessageNotifier.value =
+              'Security violation detected. Vault has been wiped.';
         }
         return;
       }
@@ -172,8 +179,10 @@ class _UnlockPageState extends State<UnlockPage> {
         return;
       }
       if (result == AuthResult.failed) {
-        final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
-        final secondaryVaults = multiVaultService.vaults.where((v) => !v.isPrimary).toList();
+        final multiVaultService =
+            Provider.of<MultiVaultService>(context, listen: false);
+        final secondaryVaults =
+            multiVaultService.vaults.where((v) => !v.isPrimary).toList();
         for (final vault in secondaryVaults) {
           final ok = await authService.verifySecondaryVaultPIN(vault.id, _pin);
           if (!mounted) return;
@@ -183,7 +192,18 @@ class _UnlockPageState extends State<UnlockPage> {
             return;
           }
         }
-        await tamperDetection.recordFailedAttempt();
+        final tamperResultAfterFailure =
+            await tamperDetection.recordFailedAttempt();
+        if (tamperResultAfterFailure.shouldWipe) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            _pin = '';
+            _pinNotifier.value = _pin;
+            _errorMessageNotifier.value =
+                'Security violation detected. Vault data has been wiped.';
+          }
+          return;
+        }
       }
       if (mounted) {
         setState(() => _isLoading = false);
@@ -209,12 +229,14 @@ class _UnlockPageState extends State<UnlockPage> {
     }
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final tamperDetection = Provider.of<TamperDetectionService>(context, listen: false);
+      final tamperDetection =
+          Provider.of<TamperDetectionService>(context, listen: false);
       final tamperResult = await tamperDetection.checkTampering();
       if (tamperResult.isTampered && tamperResult.shouldWipe) {
         if (mounted) {
           setState(() => _isLoading = false);
-          _errorMessageNotifier.value = 'Security violation detected. Vault has been wiped.';
+          _errorMessageNotifier.value =
+              'Security violation detected. Vault has been wiped.';
         }
         return;
       }
@@ -227,10 +249,13 @@ class _UnlockPageState extends State<UnlockPage> {
       }
       // Primary didn't match – try each secondary vault's pattern
       if (result == AuthResult.failed) {
-        final multiVaultService = Provider.of<MultiVaultService>(context, listen: false);
-        final secondaryVaults = multiVaultService.vaults.where((v) => !v.isPrimary).toList();
+        final multiVaultService =
+            Provider.of<MultiVaultService>(context, listen: false);
+        final secondaryVaults =
+            multiVaultService.vaults.where((v) => !v.isPrimary).toList();
         for (final vault in secondaryVaults) {
-          final ok = await authService.verifySecondaryVaultPattern(vault.id, patternString);
+          final ok = await authService.verifySecondaryVaultPattern(
+              vault.id, patternString);
           if (!mounted) return;
           if (ok) {
             await tamperDetection.resetFailedAttempts();
@@ -238,7 +263,19 @@ class _UnlockPageState extends State<UnlockPage> {
             return;
           }
         }
-        await tamperDetection.recordFailedAttempt();
+        final tamperResultAfterFailure =
+            await tamperDetection.recordFailedAttempt();
+        if (tamperResultAfterFailure.shouldWipe) {
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _patternWrongAttempt = false;
+            });
+            _errorMessageNotifier.value =
+                'Security violation detected. Vault data has been wiped.';
+          }
+          return;
+        }
       }
       if (mounted) {
         setState(() {
@@ -258,8 +295,7 @@ class _UnlockPageState extends State<UnlockPage> {
       }
     }
   }
-  
-  
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
@@ -300,33 +336,36 @@ class _UnlockPageState extends State<UnlockPage> {
             ),
           },
           child: Scaffold(
-        backgroundColor: AppTheme.primary,
-        body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxHeight < 700;
-            final scale = isCompact ? 0.85 : 1.0;
-            final padding = isCompact ? 12.0 : 32.0;
-            final spacing = isCompact ? 24.0 : 48.0;
-            final usePattern = _unlockMethod == 'pattern';
-            return Padding(
-              padding: EdgeInsets.all(padding),
-              child: Center(
-                child: SingleChildScrollView(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: constraints.maxHeight - padding * 2),
-                    child: Transform.scale(
-                      scale: scale,
-                      alignment: Alignment.center,
-                      child: usePattern ? _buildPatternUnlock() : _buildPINUnlockContent(isCompact, spacing),
+            backgroundColor: AppTheme.primary,
+            body: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isCompact = constraints.maxHeight < 700;
+                  final scale = isCompact ? 0.85 : 1.0;
+                  final padding = isCompact ? 12.0 : 32.0;
+                  final spacing = isCompact ? 24.0 : 48.0;
+                  final usePattern = _unlockMethod == 'pattern';
+                  return Padding(
+                    padding: EdgeInsets.all(padding),
+                    child: Center(
+                      child: SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                              minHeight: constraints.maxHeight - padding * 2),
+                          child: Transform.scale(
+                            scale: scale,
+                            alignment: Alignment.center,
+                            child: usePattern
+                                ? _buildPatternUnlock()
+                                : _buildPINUnlockContent(isCompact, spacing),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
-            );
-          },
-        ),
-      ),
+            ),
           ),
         ),
       ),
@@ -469,7 +508,7 @@ class _UnlockPageState extends State<UnlockPage> {
       ],
     );
   }
-  
+
   Widget _buildPINUnlock() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -521,15 +560,14 @@ class _UnlockPageState extends State<UnlockPage> {
       ],
     );
   }
-  
 }
 
 class _NumberButton extends StatelessWidget {
   final String number;
   final VoidCallback? onPressed;
-  
+
   const _NumberButton(this.number, {this.onPressed});
-  
+
   @override
   Widget build(BuildContext context) {
     return Expanded(
@@ -561,9 +599,9 @@ class _NumberButton extends StatelessWidget {
 // Extracted PIN dots widget for better performance - only rebuilds when PIN length changes
 class _PINDotsWidget extends StatelessWidget {
   final int pinLength;
-  
+
   const _PINDotsWidget({required this.pinLength});
-  
+
   @override
   Widget build(BuildContext context) {
     return Row(

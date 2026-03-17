@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,12 +10,12 @@ import '../../../shared/widgets/secure_button.dart';
 /// Paywall screen for subscription upgrades
 class PaywallPage extends StatefulWidget {
   final bool showCloseButton;
-  
+
   const PaywallPage({
     super.key,
     this.showCloseButton = true,
   });
-  
+
   @override
   State<PaywallPage> createState() => _PaywallPageState();
 }
@@ -24,11 +23,13 @@ class PaywallPage extends StatefulWidget {
 class _PaywallPageState extends State<PaywallPage> {
   SubscriptionTier? _selectedTier;
   bool _isPurchasing = false;
+  bool _isRestoring = false;
   String? _errorMessage;
 
   static final Uri _privacyPolicyUrl = Uri.parse('https://nyx.app/privacy');
   // Standard Apple Terms of Use (EULA)
-  static final Uri _termsUrl = Uri.parse('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/');
+  static final Uri _termsUrl = Uri.parse(
+      'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/');
 
   Future<void> _openExternalLink(Uri url, String fallback) async {
     try {
@@ -57,7 +58,7 @@ class _PaywallPageState extends State<PaywallPage> {
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final subscriptionService = Provider.of<SubscriptionService>(context);
@@ -66,10 +67,16 @@ class _PaywallPageState extends State<PaywallPage> {
     ProductDetails? monthlyProduct;
     ProductDetails? yearlyProduct;
     if (products.isNotEmpty) {
-      monthlyProduct = products.where((p) => p.id == SubscriptionTier.monthly.productId).cast<ProductDetails?>().firstWhere((p) => p != null, orElse: () => null);
-      yearlyProduct = products.where((p) => p.id == SubscriptionTier.yearly.productId).cast<ProductDetails?>().firstWhere((p) => p != null, orElse: () => null);
+      monthlyProduct = products
+          .where((p) => p.id == SubscriptionTier.monthly.productId)
+          .cast<ProductDetails?>()
+          .firstWhere((p) => p != null, orElse: () => null);
+      yearlyProduct = products
+          .where((p) => p.id == SubscriptionTier.yearly.productId)
+          .cast<ProductDetails?>()
+          .firstWhere((p) => p != null, orElse: () => null);
     }
-    
+
     return Scaffold(
       backgroundColor: AppTheme.primary,
       appBar: AppBar(
@@ -93,248 +100,264 @@ class _PaywallPageState extends State<PaywallPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.accent.withOpacity(0.2),
-                      blurRadius: 20,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.star_outline,
-                      size: 64,
-                      color: AppTheme.accent,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Try Premium Free for 7 Days',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.text,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      monthlyProduct != null
-                          ? 'Experience all features risk-free, then ${monthlyProduct.price}/month'
-                          : 'Experience all features risk-free, then \$4.99/month',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: AppTheme.text.withOpacity(0.7),
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
+                    // Header
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.all(32),
                       decoration: BoxDecoration(
-                        color: AppTheme.accent.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-                      ),
-                      child: Text(
-                        'No credit card required • Cancel anytime',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.accent,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 32),
-              
-              // Feature list
-              _FeatureList(),
-              
-              const SizedBox(height: 32),
-              
-              // Subscription options
-              if (subscriptionService.isLoadingProducts && !subscriptionService.hasFinishedLoading)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Column(
-                      children: [
-                        CircularProgressIndicator(color: AppTheme.accent),
-                        SizedBox(height: 16),
-                        Text(
-                          'Loading subscription options...',
-                          style: TextStyle(
-                            color: AppTheme.text,
-                            fontSize: 14,
+                        color: AppTheme.surface,
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusLarge),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.accent.withOpacity(0.2),
+                            blurRadius: 20,
+                            spreadRadius: 2,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else if (!subscriptionService.isAvailable)
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.warning.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(AppTheme.radius),
-                    border: Border.all(color: AppTheme.warning.withOpacity(0.3)),
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(Icons.info_outline, color: AppTheme.warning, size: 48),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'In-App Purchases Unavailable',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.warning,
-                        ),
-                        textAlign: TextAlign.center,
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'In-app purchases are not available on this device. Please test on a physical device with Google Play Services configured.',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppTheme.text.withOpacity(0.7),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                )
-              else if (products.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.warning.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(AppTheme.radius),
-                    border: Border.all(color: AppTheme.warning.withOpacity(0.3)),
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(Icons.error_outline, color: AppTheme.warning, size: 48),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Subscriptions Not Configured',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.warning,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Subscription products are not available. Please configure them in App Store Connect or Google Play Console.',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: AppTheme.text.withOpacity(0.7),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Column(
-                  children: [
-                    // Monthly option
-                    _SubscriptionCard(
-                      tier: SubscriptionTier.monthly,
-                      product: products.firstWhere(
-                        (p) => p.id == SubscriptionTier.monthly.productId,
-                        orElse: () => products.first, // Fallback
-                      ),
-                      isSelected: _selectedTier == SubscriptionTier.monthly,
-                      onTap: () {
-                        setState(() {
-                          _selectedTier = SubscriptionTier.monthly;
-                          _errorMessage = null;
-                        });
-                      },
-                    ),
-                    
-                    const SizedBox(height: 16),
-                    
-                    // Yearly option (highlighted as best value)
-                    Stack(
-                      children: [
-                        _SubscriptionCard(
-                          tier: SubscriptionTier.yearly,
-                          product: products.firstWhere(
-                            (p) => p.id == SubscriptionTier.yearly.productId,
-                            orElse: () => products.last, // Fallback
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.star_outline,
+                            size: 64,
+                            color: AppTheme.accent,
                           ),
-                          isSelected: _selectedTier == SubscriptionTier.yearly,
-                          onTap: () {
-                            setState(() {
-                              _selectedTier = SubscriptionTier.yearly;
-                              _errorMessage = null;
-                            });
-                          },
-                        ),
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Try Premium Free for 7 Days',
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.text,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            monthlyProduct != null
+                                ? 'Experience all features risk-free, then ${monthlyProduct.price}/month'
+                                : 'Experience all features risk-free, then \$4.99/month',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: AppTheme.text.withOpacity(0.7),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: AppTheme.accent,
-                              borderRadius: BorderRadius.circular(4),
+                              color: AppTheme.accent.withOpacity(0.2),
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusSmall),
                             ),
-                            child: const Text(
-                              'BEST VALUE',
+                            child: Text(
+                              'No credit card required • Cancel anytime',
                               style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primary,
+                                fontSize: 12,
+                                color: AppTheme.accent,
+                                fontWeight: FontWeight.w500,
                               ),
+                              textAlign: TextAlign.center,
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ],
-                ),
-              
+
+                    const SizedBox(height: 32),
+
+                    // Feature list
+                    _FeatureList(),
+
+                    const SizedBox(height: 32),
+
+                    // Subscription options
+                    if (subscriptionService.isLoadingProducts &&
+                        !subscriptionService.hasFinishedLoading)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Column(
+                            children: [
+                              CircularProgressIndicator(color: AppTheme.accent),
+                              SizedBox(height: 16),
+                              Text(
+                                'Loading subscription options...',
+                                style: TextStyle(
+                                  color: AppTheme.text,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else if (!subscriptionService.isAvailable)
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(AppTheme.radius),
+                          border: Border.all(
+                              color: AppTheme.warning.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(Icons.info_outline,
+                                color: AppTheme.warning, size: 48),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'In-App Purchases Unavailable',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.warning,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'In-app purchases are not available on this device. Please test on a physical device with Google Play Services configured.',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppTheme.text.withOpacity(0.7),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (products.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: AppTheme.warning.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(AppTheme.radius),
+                          border: Border.all(
+                              color: AppTheme.warning.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(Icons.error_outline,
+                                color: AppTheme.warning, size: 48),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Subscriptions Not Configured',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.warning,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Subscription products are not available. Please configure them in App Store Connect or Google Play Console.',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppTheme.text.withOpacity(0.7),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Column(
+                        children: [
+                          // Monthly option
+                          _SubscriptionCard(
+                            tier: SubscriptionTier.monthly,
+                            product: products.firstWhere(
+                              (p) => p.id == SubscriptionTier.monthly.productId,
+                              orElse: () => products.first, // Fallback
+                            ),
+                            isSelected:
+                                _selectedTier == SubscriptionTier.monthly,
+                            onTap: () {
+                              setState(() {
+                                _selectedTier = SubscriptionTier.monthly;
+                                _errorMessage = null;
+                              });
+                            },
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Yearly option (highlighted as best value)
+                          Stack(
+                            children: [
+                              _SubscriptionCard(
+                                tier: SubscriptionTier.yearly,
+                                product: products.firstWhere(
+                                  (p) =>
+                                      p.id == SubscriptionTier.yearly.productId,
+                                  orElse: () => products.last, // Fallback
+                                ),
+                                isSelected:
+                                    _selectedTier == SubscriptionTier.yearly,
+                                onTap: () {
+                                  setState(() {
+                                    _selectedTier = SubscriptionTier.yearly;
+                                    _errorMessage = null;
+                                  });
+                                },
+                              ),
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.accent,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    'BEST VALUE',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
                     if (_errorMessage != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: AppTheme.warning.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
-                          border: Border.all(color: AppTheme.warning.withOpacity(0.3)),
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusSmall),
+                          border: Border.all(
+                              color: AppTheme.warning.withOpacity(0.3)),
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.error_outline, color: AppTheme.warning, size: 20),
+                            Icon(Icons.error_outline,
+                                color: AppTheme.warning, size: 20),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 _errorMessage!,
-                                style: const TextStyle(color: AppTheme.warning, fontSize: 14),
+                                style: const TextStyle(
+                                    color: AppTheme.warning, fontSize: 14),
                               ),
                             ),
                           ],
                         ),
                       ),
                     ],
-                    
+
                     const SizedBox(height: 24),
 
                     // Required subscription disclosure + links (App Review requirement)
@@ -343,7 +366,8 @@ class _PaywallPageState extends State<PaywallPage> {
                       decoration: BoxDecoration(
                         color: AppTheme.surface,
                         borderRadius: BorderRadius.circular(AppTheme.radius),
-                        border: Border.all(color: AppTheme.divider.withOpacity(0.3)),
+                        border: Border.all(
+                            color: AppTheme.divider.withOpacity(0.3)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -395,7 +419,7 @@ class _PaywallPageState extends State<PaywallPage> {
                 ),
               ),
             ),
-            
+
             // Fixed buttons section at bottom
             Container(
               padding: const EdgeInsets.all(24),
@@ -424,15 +448,18 @@ class _PaywallPageState extends State<PaywallPage> {
                         : null,
                     isLoading: _isPurchasing,
                   ),
-                  
+
                   const SizedBox(height: 12),
-                  
+
                   // Restore purchases
                   TextButton(
-                    onPressed: _handleRestore,
-                    child: const Text('Restore Purchases'),
+                    onPressed:
+                        (_isPurchasing || _isRestoring) ? null : _handleRestore,
+                    child: Text(
+                      _isRestoring ? 'Restoring...' : 'Restore Purchases',
+                    ),
                   ),
-                  
+
                   // Terms text
                   Text(
                     'Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. Manage your subscription in your Apple Account Settings.',
@@ -450,54 +477,126 @@ class _PaywallPageState extends State<PaywallPage> {
       ),
     );
   }
-  
+
   Future<void> _handlePurchase() async {
     if (_selectedTier == null) return;
-    
+
     setState(() {
       _isPurchasing = true;
       _errorMessage = null;
     });
-    
-    final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+
+    final subscriptionService =
+        Provider.of<SubscriptionService>(context, listen: false);
 
     // Always use the platform purchase flow.
     // Any free-trial eligibility is applied by App Store / Play Store.
-    final success = await subscriptionService.purchaseSubscription(_selectedTier!);
-    
+    final result =
+        await subscriptionService.purchaseSubscription(_selectedTier!);
+
     if (!mounted) return;
-    
+
     setState(() {
       _isPurchasing = false;
     });
-    
-    if (success) {
-      // Purchase will be handled by subscription service
-      // Close paywall after successful purchase
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted && widget.showCloseButton) {
-          Navigator.of(context).pop();
-        }
-      });
-    } else {
-      setState(() {
-        _errorMessage = 'Purchase failed. Please try again.';
-      });
+
+    switch (result) {
+      case PurchaseResult.success:
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted && widget.showCloseButton) {
+            Navigator.of(context).pop();
+          }
+        });
+        break;
+      case PurchaseResult.pending:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Purchase is pending store confirmation. Premium access will unlock automatically once it clears.',
+            ),
+            backgroundColor: AppTheme.accent,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        break;
+      case PurchaseResult.cancelled:
+        setState(() {
+          _errorMessage = 'Purchase canceled.';
+        });
+        break;
+      case PurchaseResult.alreadyInProgress:
+        setState(() {
+          _errorMessage = 'A purchase is already in progress.';
+        });
+        break;
+      case PurchaseResult.unavailable:
+        setState(() {
+          _errorMessage =
+              'Subscriptions are unavailable right now. Please try again in a moment.';
+        });
+        break;
+      case PurchaseResult.failed:
+        setState(() {
+          _errorMessage = 'Purchase failed. Please try again.';
+        });
+        break;
     }
   }
-  
+
   Future<void> _handleRestore() async {
-    final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    await subscriptionService.restorePurchases();
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Purchases restored'),
-          backgroundColor: AppTheme.accent,
-          duration: Duration(seconds: 2),
-        ),
-      );
+    setState(() {
+      _isRestoring = true;
+      _errorMessage = null;
+    });
+
+    final subscriptionService =
+        Provider.of<SubscriptionService>(context, listen: false);
+    final result = await subscriptionService.restorePurchases();
+
+    if (!mounted) return;
+
+    setState(() {
+      _isRestoring = false;
+    });
+
+    switch (result) {
+      case RestorePurchasesResult.restored:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Active subscription restored.'),
+            backgroundColor: AppTheme.accent,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case RestorePurchasesResult.noActivePurchases:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No active subscription was found for this account.'),
+            backgroundColor: AppTheme.warning,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        break;
+      case RestorePurchasesResult.alreadyInProgress:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('A restore is already in progress.'),
+            backgroundColor: AppTheme.warning,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        break;
+      case RestorePurchasesResult.unavailable:
+        setState(() {
+          _errorMessage = 'Restoring purchases is unavailable on this device.';
+        });
+        break;
+      case RestorePurchasesResult.failed:
+        setState(() {
+          _errorMessage = 'Restore failed. Please try again.';
+        });
+        break;
     }
   }
 }
@@ -505,13 +604,6 @@ class _PaywallPageState extends State<PaywallPage> {
 class _FeatureList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final features = [
-      'Unlimited storage for photos, videos, and documents',
-      'Priority encryption processing',
-      'All security features included',
-      'Cancel anytime',
-    ];
-    
     return Column(
       children: [
         _FeatureItem(
@@ -522,8 +614,8 @@ class _FeatureList extends StatelessWidget {
         const SizedBox(height: 16),
         _FeatureItem(
           icon: Icons.security,
-          title: 'Zero-Knowledge Encryption',
-          description: 'Your data is encrypted on-device',
+          title: 'Local-Only Privacy',
+          description: 'Your vault files stay on your device',
         ),
         const SizedBox(height: 16),
         _FeatureItem(
@@ -541,14 +633,14 @@ class _SubscriptionCard extends StatelessWidget {
   final ProductDetails product;
   final bool isSelected;
   final VoidCallback onTap;
-  
+
   const _SubscriptionCard({
     required this.tier,
     required this.product,
     required this.isSelected,
     required this.onTap,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     final periodLabel = tier == SubscriptionTier.monthly ? '1 month' : '1 year';
@@ -588,7 +680,7 @@ class _SubscriptionCard extends StatelessWidget {
                   : null,
             ),
             const SizedBox(width: 16),
-            
+
             // Tier info
             Expanded(
               child: Column(
@@ -597,7 +689,9 @@ class _SubscriptionCard extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        product.title.isNotEmpty ? product.title : tier.displayName,
+                        product.title.isNotEmpty
+                            ? product.title
+                            : tier.displayName,
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
@@ -607,7 +701,8 @@ class _SubscriptionCard extends StatelessWidget {
                       if (tier == SubscriptionTier.yearly) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: AppTheme.accent,
                             borderRadius: BorderRadius.circular(4),
@@ -632,7 +727,8 @@ class _SubscriptionCard extends StatelessWidget {
                       color: AppTheme.text.withOpacity(0.7),
                     ),
                   ),
-                  if (tier == SubscriptionTier.yearly && tier.monthlyEquivalent != null) ...[
+                  if (tier == SubscriptionTier.yearly &&
+                      tier.monthlyEquivalent != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       tier.monthlyEquivalent!,
@@ -657,13 +753,13 @@ class _FeatureItem extends StatelessWidget {
   final IconData icon;
   final String title;
   final String description;
-  
+
   const _FeatureItem({
     required this.icon,
     required this.title,
     required this.description,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Row(

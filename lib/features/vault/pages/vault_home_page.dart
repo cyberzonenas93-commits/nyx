@@ -50,7 +50,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
   StreamSubscription<ImportProgress>? _importProgressSubscription;
   String? _currentFolderId; // null = root, otherwise folder ID
   String _selectedAlbumId = 'smart_recent'; // Default to Recent
-  final Set<String> _selectedTagFilterIds = <String>{}; // Color-tag filters (ANDed with album/folder)
+  final Set<String> _selectedTagFilterIds =
+      <String>{}; // Color-tag filters (ANDed with album/folder)
   bool _isGridView = true;
   bool _isSelectionMode = false;
   Set<String> _selectedItemIds = {};
@@ -61,7 +62,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
   Timer? _importBannerDismissTimer;
   bool _foldersMinimized = false;
   bool _filesMinimized = false;
-  
+
   // Avoid repeatedly queuing thumbnail generation from the UI.
   final Set<String> _requestedMissingThumbnails = <String>{};
 
@@ -76,7 +77,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
     'pink': Color(0xFFD81B60),
     'gray': Color(0xFF78909C),
   };
-  
+
   // Tutorial keys
   final GlobalKey _fabKey = GlobalKey();
   final GlobalKey _albumSelectorKey = GlobalKey();
@@ -86,17 +87,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
   final GlobalKey _viewToggleKey = GlobalKey();
   final GlobalKey _settingsKey = GlobalKey();
   final GlobalKey _lockKey = GlobalKey();
-  
+
   bool _showTutorial = false;
   int _tutorialStep = 0;
 
-  // God mode: 7 rapid taps on vault title then enter code 17031995
+  // Debug-only developer override entry point.
   int _vaultTitleTapCount = 0;
   DateTime? _vaultTitleLastTapAt;
   static const _vaultTitleTapWindow = Duration(seconds: 2);
   static const _vaultTitleTapsRequired = 7;
   static const _godModeCode = '17031995';
-  
+
   @override
   void initState() {
     super.initState();
@@ -105,25 +106,26 @@ class _VaultHomePageState extends State<VaultHomePage> {
     _checkTutorialStatus();
     _checkTrialExpiration();
   }
-  
+
   Future<void> _loadViewSettings() async {
     final prefs = await SharedPreferences.getInstance();
-      setState(() {
+    if (!mounted) return;
+    setState(() {
       _foldersMinimized = prefs.getBool('vault_folders_minimized') ?? false;
       _filesMinimized = prefs.getBool('vault_files_minimized') ?? false;
     });
   }
-  
+
   Future<void> _saveFoldersMinimized(bool minimized) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('vault_folders_minimized', minimized);
   }
-  
+
   Future<void> _saveFilesMinimized(bool minimized) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('vault_files_minimized', minimized);
   }
-  
+
   @override
   void dispose() {
     _importBannerDismissTimer?.cancel();
@@ -132,18 +134,19 @@ class _VaultHomePageState extends State<VaultHomePage> {
     _backgroundImportService?.dispose();
     super.dispose();
   }
-  
+
   /// Initialize background import service
   void _initBackgroundImportService() {
     if (_backgroundImportService == null) {
       final vaultService = Provider.of<VaultService>(context, listen: false);
       _backgroundImportService = BackgroundImportService(vaultService);
-      
+
       // Resume any pending imports from background
       _backgroundImportService!.resume();
-      
+
       // Listen to progress updates
-      _importProgressSubscription = _backgroundImportService!.progressStream.listen((progress) {
+      _importProgressSubscription =
+          _backgroundImportService!.progressStream.listen((progress) {
         if (mounted) {
           if (!progress.isComplete) {
             // A new import update arrived; don't allow a pending completion timer
@@ -163,7 +166,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
               });
             }
           });
-          
+
           // Show completion message
           if (progress.isComplete) {
             // Auto-dismiss the bottom banner after completion so it doesn't stick.
@@ -178,14 +181,15 @@ class _VaultHomePageState extends State<VaultHomePage> {
               });
             });
 
-            final hasFailures = progress.failCount != null && progress.failCount! > 0;
+            final hasFailures =
+                progress.failCount != null && progress.failCount! > 0;
             final message = hasFailures
                 ? 'Imported ${progress.successCount} file(s), ${progress.failCount} failed'
                 : 'Imported ${progress.successCount} file(s)';
             final hint = hasFailures
                 ? 'Files in iCloud: open them in Photos or Files first, then try again.'
                 : null;
-            
+
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Column(
@@ -205,7 +209,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     ],
                   ],
                 ),
-                backgroundColor: hasFailures ? AppTheme.warning : AppTheme.accent,
+                backgroundColor:
+                    hasFailures ? AppTheme.warning : AppTheme.accent,
                 duration: const Duration(seconds: 5),
               ),
             );
@@ -279,7 +284,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
       if (mounted) {
         setState(() {
           _importProgress = i; // "preparing" progress
-          _importStatus = 'Preparing video ${i + 1} / ${pickedAssets.length}...';
+          _importStatus =
+              'Preparing video ${i + 1} / ${pickedAssets.length}...';
         });
       }
       try {
@@ -313,7 +319,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Could not access the selected videos for import. Please try again.'),
+            content: Text(
+                'Could not access the selected videos for import. Please try again.'),
             backgroundColor: AppTheme.warning,
             duration: Duration(seconds: 4),
           ),
@@ -327,8 +334,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
 
     // Check subscription limits
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
+    final subscriptionService =
+        Provider.of<SubscriptionService>(context, listen: false);
+    final hasPremium = subscriptionService.currentTier.isUnlimited ||
+        subscriptionService.isInTrial;
 
     if (!hasPremium) {
       final currentItemCount = vaultService.items.length;
@@ -380,22 +389,22 @@ class _VaultHomePageState extends State<VaultHomePage> {
       });
     }
   }
-  
+
   Future<void> _initializeVault() async {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final authService = Provider.of<AuthService>(context, listen: false);
       final vaultService = Provider.of<VaultService>(context, listen: false);
-      
+
       // Get master key
       final masterKey = authService.masterKey;
-      
+
       // Get vault ID (null = primary vault)
       final vaultId = widget.vaultId ?? authService.currentVaultId;
-      
+
       // Check if we need to reinitialize (switching vaults)
-      final needsReinit = !vaultService.isInitialized ||
-          vaultService.currentVaultId != vaultId;
-      
+      final needsReinit =
+          !vaultService.isInitialized || vaultService.currentVaultId != vaultId;
+
       if (needsReinit) {
         // Initialize or reinitialize vault
         await vaultService.initialize(
@@ -407,20 +416,21 @@ class _VaultHomePageState extends State<VaultHomePage> {
           setState(() {}); // Refresh UI after initialization
         }
       }
-      
+
       // Initialize background import service after vault is ready
       _initBackgroundImportService();
     });
   }
-  
+
   Future<void> _checkTutorialStatus() async {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final tutorialService = Provider.of<TutorialService>(context, listen: false);
+      final tutorialService =
+          Provider.of<TutorialService>(context, listen: false);
       if (!tutorialService.vaultTutorialCompleted) {
         // Wait a bit for UI to render
         await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted) {
-      setState(() {
+        if (mounted) {
+          setState(() {
             _showTutorial = true;
             _tutorialStep = 0;
           });
@@ -428,26 +438,29 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     });
   }
-  
+
   void _checkTrialExpiration() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-      
+      final subscriptionService =
+          Provider.of<SubscriptionService>(context, listen: false);
+
       // Check if trial is expiring soon (1-2 days remaining)
       if (subscriptionService.isInTrial) {
         final daysRemaining = subscriptionService.trialDaysRemaining ?? 0;
-        
+
         // Show reminder dialog if trial expires in 1-2 days
         if (daysRemaining <= 2 && daysRemaining > 0) {
-          await Future.delayed(const Duration(seconds: 2)); // Wait for UI to load
+          await Future.delayed(
+              const Duration(seconds: 2)); // Wait for UI to load
           if (mounted) {
-            _showTrialExpirationReminder(context, subscriptionService, daysRemaining);
+            _showTrialExpirationReminder(
+                context, subscriptionService, daysRemaining);
           }
         }
       }
     });
   }
-  
+
   void _showTrialExpirationReminder(
     BuildContext context,
     SubscriptionService subscriptionService,
@@ -464,14 +477,18 @@ class _VaultHomePageState extends State<VaultHomePage> {
         title: Row(
           children: [
             Icon(
-              daysRemaining == 1 ? Icons.warning_amber_rounded : Icons.timer_outlined,
+              daysRemaining == 1
+                  ? Icons.warning_amber_rounded
+                  : Icons.timer_outlined,
               color: AppTheme.warning,
               size: 28,
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                daysRemaining == 1 ? 'Trial Ends Tomorrow!' : 'Trial Ending Soon',
+                daysRemaining == 1
+                    ? 'Trial Ends Tomorrow!'
+                    : 'Trial Ending Soon',
                 style: const TextStyle(
                   color: AppTheme.text,
                   fontSize: 20,
@@ -539,7 +556,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
               Navigator.of(context).pop();
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (context) => const PaywallPage(showCloseButton: true),
+                  builder: (context) =>
+                      const PaywallPage(showCloseButton: true),
                 ),
               );
             },
@@ -558,13 +576,14 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   List<TutorialStep> _getTutorialSteps() {
     return [
       TutorialStep(
         id: 'welcome',
         title: 'Welcome to Your Vault!',
-        description: 'This is your secure vault where all your files are encrypted and protected. Let\'s take a quick tour to learn how to use all the features.',
+        description:
+            'This is your private vault space. Files stay local to your device, and the app locks access behind your unlock method. Let\'s take a quick tour of the main features.',
         alignment: Alignment.center,
         showSkipButton: true,
         showPreviousButton: false,
@@ -572,104 +591,118 @@ class _VaultHomePageState extends State<VaultHomePage> {
       TutorialStep(
         id: 'add_files',
         title: 'Add Files to Your Vault',
-        description: 'Tap the + button to add files. You can:\n• Take photos or record videos\n• Import from your gallery\n• Import any file type\n\nAll files are automatically encrypted!',
+        description:
+            'Tap the + button to add files. You can:\n• Take photos or record videos\n• Import from your gallery\n• Import any file type\n\nNyx keeps imported files inside the app-managed vault on your device.',
         targetKey: _fabKey,
         alignment: Alignment.bottomCenter,
       ),
       TutorialStep(
         id: 'albums',
         title: 'Organize with Albums',
-        description: 'Use albums to filter and organize your files:\n• Recent: All items sorted by date\n• Photos: All your photos\n• Videos: All your videos\n• Audio: All audio files\n• Documents: PDFs and other files\n\nTap an album to filter your vault!',
+        description:
+            'Use albums to filter and organize your files:\n• Recent: All items sorted by date\n• Photos: All your photos\n• Videos: All your videos\n• Audio: All audio files\n• Documents: PDFs and other files\n\nTap an album to filter your vault!',
         targetKey: _albumSelectorKey,
         alignment: Alignment.topCenter,
       ),
       TutorialStep(
         id: 'view_items',
         title: 'View Your Files',
-        description: 'Your files are displayed here:\n• Grid view: See thumbnails in a grid\n• List view: See files in a list\n• Tap any file to open and view it\n• Long-press to select multiple files',
+        description:
+            'Your files are displayed here:\n• Grid view: See thumbnails in a grid\n• List view: See files in a list\n• Tap any file to open and view it\n• Long-press to select multiple files',
         targetKey: _gridViewKey,
         alignment: Alignment.center,
       ),
       TutorialStep(
         id: 'download',
         title: 'Download Files',
-        description: 'Download files back to your device:\n• Download All: Export everything\n• Select files and download selected\n• Download entire albums\n• Files are saved to your photo library or downloads folder',
+        description:
+            'Download files back to your device:\n• Download All: Export everything\n• Select files and download selected\n• Download entire albums\n• Files are saved to your photo library or downloads folder',
         targetKey: _downloadAllKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'browser',
         title: 'Built-in Private Browser',
-        description: 'Access the private browser:\n• Download videos and audio from websites\n• Bookmark your favorite sites\n• Block spammy redirects\n• Browse privately with no history saved\n\nPerfect for downloading media!',
+        description:
+            'Access the private browser:\n• Download videos and audio from websites\n• Bookmark your favorite sites\n• Block spammy redirects\n• Browse privately with no history saved\n\nPerfect for downloading media!',
         targetKey: _browserKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'view_toggle',
         title: 'Switch Views',
-        description: 'Toggle between grid and list views:\n• Grid view: Visual thumbnails\n• List view: Detailed file information\n• Choose what works best for you!',
+        description:
+            'Toggle between grid and list views:\n• Grid view: Visual thumbnails\n• List view: Detailed file information\n• Choose what works best for you!',
         targetKey: _viewToggleKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'folders',
         title: 'Organize with Folders',
-        description: 'Create folders to organize your files:\n• Long-press files to select them\n• Tap "Move to Folder" to organize\n• Create new folders as needed\n• Navigate folders using breadcrumbs\n\nKeep your vault organized!',
+        description:
+            'Create folders to organize your files:\n• Long-press files to select them\n• Tap "Move to Folder" to organize\n• Create new folders as needed\n• Navigate folders using breadcrumbs\n\nKeep your vault organized!',
         targetKey: _gridViewKey,
         alignment: Alignment.center,
       ),
       TutorialStep(
         id: 'media_playback',
         title: 'Play Media Files',
-        description: 'View and play your media:\n• Tap any photo to view full screen\n• Tap videos to play them\n• Tap audio files to play\n• Swipe between files\n• Use media controls for playback\n\nAll media plays directly in your vault!',
+        description:
+            'View and play your media:\n• Tap any photo to view full screen\n• Tap videos to play them\n• Tap audio files to play\n• Swipe between files\n• Use media controls for playback\n\nAll media plays directly in your vault!',
         targetKey: _gridViewKey,
         alignment: Alignment.center,
       ),
       TutorialStep(
         id: 'media_converter',
         title: 'Media Converter',
-        description: 'Convert videos to audio:\n• Open any video file\n• Tap the convert button\n• Extract audio from videos\n• Save as MP3 or other formats\n\nPerfect for creating audio files!',
+        description:
+            'Convert videos to audio:\n• Open any video file\n• Tap the convert button\n• Extract audio from videos\n• Save as MP3 or other formats\n\nPerfect for creating audio files!',
         targetKey: _gridViewKey,
         alignment: Alignment.center,
       ),
       TutorialStep(
         id: 'downloads_page',
         title: 'Downloads Page',
-        description: 'Track your downloads:\n• View all active downloads\n• See download progress\n• Pause or resume downloads\n• Access completed downloads\n• Manage download queue\n\nAll browser downloads appear here!',
+        description:
+            'Track your downloads:\n• View all active downloads\n• See download progress\n• Pause or resume downloads\n• Access completed downloads\n• Manage download queue\n\nAll browser downloads appear here!',
         targetKey: _browserKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'settings',
         title: 'Vault Settings',
-        description: 'Manage your vault settings:\n• Change your PIN\n• Update trigger code\n• Manage storage location\n• Configure panic switch\n• Create multiple vaults (Primary vault only)\n• Manage subscription\n\nAccess all settings from here!',
+        description:
+            'Manage your vault settings:\n• Change your PIN\n• Update trigger code\n• Manage storage location\n• Configure panic switch\n• Create multiple vaults (Primary vault only)\n• Manage subscription\n\nAccess all settings from here!',
         targetKey: _settingsKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'lock_vault',
         title: 'Lock Your Vault',
-        description: 'Lock your vault for security:\n• Tap the lock icon to lock immediately\n• Vault locks automatically when app goes to background\n• Requires PIN to unlock again\n• Returns to unlock screen\n\nKeep your vault secure!',
+        description:
+            'Lock your vault for security:\n• Tap the lock icon to lock immediately\n• Vault locks automatically when app goes to background\n• Requires PIN to unlock again\n• Returns to unlock screen\n\nKeep your vault secure!',
         targetKey: _lockKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'multiple_vaults',
         title: 'Multiple Vaults (Premium)',
-        description: 'Create multiple vaults:\n• Primary vault manages all vaults\n• Create secondary vaults with different trigger codes\n• Each vault has its own PIN\n• Recover codes from primary vault\n• Access vaults via their unique trigger codes\n\nPerfect for organizing different types of content!',
+        description:
+            'Create multiple vaults:\n• Primary vault manages all vaults\n• Create secondary vaults with different trigger codes\n• Each vault has its own PIN\n• Recover codes from primary vault\n• Access vaults via their unique trigger codes\n\nPerfect for organizing different types of content!',
         targetKey: _settingsKey,
         alignment: Alignment.topRight,
       ),
       TutorialStep(
         id: 'complete',
         title: 'You\'re All Set!',
-        description: 'You now know how to:\n✓ Add files to your vault\n✓ Organize with albums and folders\n✓ View and play media files\n✓ Download files and manage downloads\n✓ Use the browser\n✓ Configure settings and security\n✓ Create multiple vaults (Premium)\n✓ Lock your vault for security\n\nYour vault is ready to protect your privacy!',
+        description:
+            'You now know how to:\n✓ Add files to your vault\n✓ Organize with albums and folders\n✓ View and play media files\n✓ Download files and manage downloads\n✓ Use the browser\n✓ Configure settings and security\n✓ Create multiple vaults (Premium)\n✓ Lock your vault for security\n\nYour vault is ready to protect your privacy!',
         alignment: Alignment.center,
         showNextButton: false,
       ),
     ];
   }
-  
+
   void _onTutorialStepChanged(int step) {
     // Defer setState to avoid calling during build phase
     Future.microtask(() {
@@ -680,9 +713,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     });
   }
-  
+
   void _onTutorialComplete() {
-    final tutorialService = Provider.of<TutorialService>(context, listen: false);
+    final tutorialService =
+        Provider.of<TutorialService>(context, listen: false);
     tutorialService.markTutorialCompleted();
     // Defer setState to avoid calling during build phase
     Future.microtask(() {
@@ -694,21 +728,22 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     });
   }
-  
+
   void _onTutorialSkip() {
-    final tutorialService = Provider.of<TutorialService>(context, listen: false);
+    final tutorialService =
+        Provider.of<TutorialService>(context, listen: false);
     tutorialService.markTutorialCompleted();
     setState(() {
       _showTutorial = false;
       _tutorialStep = 0;
     });
   }
-  
+
   List<VaultItem> _getDisplayItems() {
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    
+
     List<VaultItem> baseItems;
-    
+
     // If in a folder, get folder items
     if (_currentFolderId != null) {
       baseItems = vaultService.getFolderItems(_currentFolderId!);
@@ -717,7 +752,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       // Files moved into folders should not appear in the Files category
       baseItems = vaultService.getRootItems();
     }
-    
+
     // Apply album filter to the base items
     if (_selectedAlbumId.startsWith('smart_')) {
       final filtered = _applySmartAlbumFilter(baseItems, _selectedAlbumId);
@@ -728,16 +763,19 @@ class _VaultHomePageState extends State<VaultHomePage> {
         (a) => a.id == _selectedAlbumId,
         orElse: () => vaultService.albums.first,
       );
-      final result = baseItems.where((item) => album.itemIds.contains(item.id)).toList();
+      final result =
+          baseItems.where((item) => album.itemIds.contains(item.id)).toList();
       final tagFiltered = _applyTagFilter(result);
-      tagFiltered.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+      tagFiltered.sort((a, b) =>
+          _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
       return tagFiltered;
     }
-    
+
     // Default: show all items sorted by date (Recent)
     final result = List<VaultItem>.from(baseItems);
     final tagFiltered = _applyTagFilter(result);
-    tagFiltered.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+    tagFiltered.sort((a, b) =>
+        _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
     return tagFiltered;
   }
 
@@ -756,7 +794,11 @@ class _VaultHomePageState extends State<VaultHomePage> {
   List<String> _getItemTagIds(VaultItem item) {
     final raw = item.metadata?['tags'];
     if (raw is List) {
-      return raw.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      return raw
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
     }
     if (raw is String) {
       final t = raw.trim();
@@ -775,43 +817,60 @@ class _VaultHomePageState extends State<VaultHomePage> {
       return false;
     }).toList();
   }
-  
-  List<VaultItem> _applySmartAlbumFilter(List<VaultItem> items, String albumId) {
+
+  List<VaultItem> _applySmartAlbumFilter(
+      List<VaultItem> items, String albumId) {
     switch (albumId) {
       case 'smart_photos':
-        final result = items.where((i) => i.type == VaultItemType.photo).toList();
-        result.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+        final result =
+            items.where((i) => i.type == VaultItemType.photo).toList();
+        result.sort((a, b) => _chronologicalTimestampMs(a)
+            .compareTo(_chronologicalTimestampMs(b)));
         return result;
       case 'smart_videos':
-        final result = items.where((i) => i.type == VaultItemType.video).toList();
-        result.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+        final result =
+            items.where((i) => i.type == VaultItemType.video).toList();
+        result.sort((a, b) => _chronologicalTimestampMs(a)
+            .compareTo(_chronologicalTimestampMs(b)));
         return result;
       case 'smart_audio':
-        final result = items.where((i) => i.type == VaultItemType.audio).toList();
-        result.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+        final result =
+            items.where((i) => i.type == VaultItemType.audio).toList();
+        result.sort((a, b) => _chronologicalTimestampMs(a)
+            .compareTo(_chronologicalTimestampMs(b)));
         return result;
       case 'smart_documents':
-        final result = items.where((i) => i.type == VaultItemType.document || i.type == VaultItemType.archive).toList();
-        result.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+        final result = items
+            .where((i) =>
+                i.type == VaultItemType.document ||
+                i.type == VaultItemType.archive)
+            .toList();
+        result.sort((a, b) => _chronologicalTimestampMs(a)
+            .compareTo(_chronologicalTimestampMs(b)));
         return result;
       case 'smart_downloads':
-        final result = items.where((i) => i.source == VaultItemSource.browser).toList();
-        result.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+        final result =
+            items.where((i) => i.source == VaultItemSource.browser).toList();
+        result.sort((a, b) => _chronologicalTimestampMs(a)
+            .compareTo(_chronologicalTimestampMs(b)));
         return result;
       case 'smart_recent':
       default:
         final result = List<VaultItem>.from(items);
-        result.sort((a, b) => _chronologicalTimestampMs(a).compareTo(_chronologicalTimestampMs(b)));
+        result.sort((a, b) => _chronologicalTimestampMs(a)
+            .compareTo(_chronologicalTimestampMs(b)));
         return result;
     }
   }
-  
+
   List<VaultFolder> _getDisplayFolders() {
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    return vaultService.folders.where((f) => f.parentFolderId == _currentFolderId).toList()
+    return vaultService.folders
+        .where((f) => f.parentFolderId == _currentFolderId)
+        .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
   }
-  
+
   void _toggleSelectionMode() {
     // Defer setState to avoid calling during build phase
     Future.microtask(() {
@@ -827,6 +886,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
   }
 
   void _onVaultTitleTap() {
+    if (!kDebugMode) return;
     if (_isSelectionMode) return;
     final now = DateTime.now();
     if (_vaultTitleLastTapAt != null &&
@@ -843,6 +903,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
   }
 
   Future<void> _showGodModeCodeDialog() async {
+    if (!kDebugMode) return;
     final controller = TextEditingController();
     final formKey = GlobalKey<FormState>();
     final code = await showDialog<String>(
@@ -925,7 +986,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   void _toggleItemSelection(String itemId) {
     // Defer setState to avoid calling during build phase
     Future.microtask(() {
@@ -953,7 +1014,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     });
   }
-  
+
   Future<void> _lockVault() async {
     if (!mounted) return;
     try {
@@ -979,11 +1040,11 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   void _navigateToBrowser(BuildContext context) {
     final navigator = Navigator.of(context);
     bool browserPageExists = false;
-    
+
     // Check if BrowserPage is already in the navigation stack
     navigator.popUntil((route) {
       if (route.settings.name == '/browser') {
@@ -995,18 +1056,18 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
       return false;
     });
-    
+
     // If BrowserPage doesn't exist, push it
     if (!browserPageExists) {
       navigator.push(
-          MaterialPageRoute(
+        MaterialPageRoute(
           builder: (context) => const BrowserPage(),
           settings: const RouteSettings(name: '/browser'),
         ),
       );
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final isImportBannerVisible = _isImporting || _importStatus != null;
@@ -1057,7 +1118,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ],
           if (!_isSelectionMode)
             Selector<SubscriptionService, bool>(
-              selector: (_, service) => service.currentTier.isUnlimited || service.isInTrial,
+              selector: (_, service) =>
+                  service.currentTier.isUnlimited || service.isInTrial,
               builder: (context, hasPremium, _) {
                 return IconButton(
                   key: _downloadAllKey,
@@ -1066,7 +1128,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     color: hasPremium ? null : AppTheme.text.withOpacity(0.4),
                   ),
                   onPressed: hasPremium ? _downloadAll : _showPaywall,
-                  tooltip: hasPremium ? 'Download All' : 'Download All (Premium)',
+                  tooltip:
+                      hasPremium ? 'Download All' : 'Download All (Premium)',
                 );
               },
             ),
@@ -1074,14 +1137,15 @@ class _VaultHomePageState extends State<VaultHomePage> {
             key: _viewToggleKey,
             icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
             onPressed: () {
-    setState(() {
+              setState(() {
                 _isGridView = !_isGridView;
               });
             },
             tooltip: _isGridView ? 'List View' : 'Grid View',
           ),
           Selector<SubscriptionService, bool>(
-            selector: (_, service) => service.currentTier.isUnlimited || service.isInTrial,
+            selector: (_, service) =>
+                service.currentTier.isUnlimited || service.isInTrial,
             builder: (context, hasPremium, _) {
               return IconButton(
                 key: _browserKey,
@@ -1092,7 +1156,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                 onPressed: hasPremium
                     ? () {
                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (context) => const BrowserPage()),
+                          MaterialPageRoute(
+                              builder: (context) => const BrowserPage()),
                         );
                       }
                     : _showPaywall,
@@ -1101,7 +1166,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
             },
           ),
           Selector<SubscriptionService, bool>(
-            selector: (_, service) => service.currentTier.isUnlimited || service.isInTrial,
+            selector: (_, service) =>
+                service.currentTier.isUnlimited || service.isInTrial,
             builder: (context, hasPremium, _) {
               return IconButton(
                 icon: Icon(
@@ -1111,11 +1177,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
                 onPressed: hasPremium
                     ? () {
                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (context) => const WiFiTransferPage()),
+                          MaterialPageRoute(
+                              builder: (context) => const WiFiTransferPage()),
                         );
                       }
                     : _showPaywall,
-                tooltip: hasPremium ? 'WiFi Transfer' : 'WiFi Transfer (Premium)',
+                tooltip:
+                    hasPremium ? 'WiFi Transfer' : 'WiFi Transfer (Premium)',
               );
             },
           ),
@@ -1124,7 +1192,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
             icon: const Icon(Icons.settings),
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const VaultSettingsPage()),
+                MaterialPageRoute(
+                    builder: (context) => const VaultSettingsPage()),
               );
             },
             tooltip: 'Settings',
@@ -1144,10 +1213,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
               child: CircularProgressIndicator(color: AppTheme.accent),
             );
           }
-          
+
           final folders = _getDisplayFolders();
           final items = _getDisplayItems();
-          
+
           return Stack(
             children: [
               Column(
@@ -1157,15 +1226,16 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     selector: (_, service) => service.isInTrial,
                     builder: (context, isInTrial, child) {
                       if (isInTrial) {
-                        final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+                        final subscriptionService =
+                            Provider.of<SubscriptionService>(context,
+                                listen: false);
                         return _buildTrialBanner(context, subscriptionService);
                       }
                       return const SizedBox.shrink();
                     },
                   ),
                   // Breadcrumb navigation
-                  if (_currentFolderId != null)
-                    _buildBreadcrumb(vaultService),
+                  if (_currentFolderId != null) _buildBreadcrumb(vaultService),
                   Container(
                     key: _albumSelectorKey,
                     child: _buildAlbumSelector(vaultService),
@@ -1237,11 +1307,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
-  Widget _buildTrialBanner(BuildContext context, SubscriptionService subscriptionService) {
+
+  Widget _buildTrialBanner(
+      BuildContext context, SubscriptionService subscriptionService) {
     final daysRemaining = subscriptionService.trialDaysRemaining ?? 0;
     final isExpiringSoon = daysRemaining <= 2;
-    
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.all(16),
@@ -1317,16 +1388,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Widget _buildEmptyState(VaultService vaultService) {
     // Check if a filter is active (not the default "Recent")
-    final isFilterActive = _selectedAlbumId != 'smart_recent' || _selectedTagFilterIds.isNotEmpty;
+    final isFilterActive =
+        _selectedAlbumId != 'smart_recent' || _selectedTagFilterIds.isNotEmpty;
     final selectedAlbum = vaultService.albums.firstWhere(
       (album) => album.id == _selectedAlbumId,
       orElse: () => vaultService.albums.first,
     );
     final totalItems = vaultService.items.length;
-    
+
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -1338,125 +1410,130 @@ class _VaultHomePageState extends State<VaultHomePage> {
               onTap: (!isFilterActive || totalItems == 0) ? _showAddMenu : null,
               behavior: HitTestBehavior.opaque,
               child: InkWell(
-                onTap: (!isFilterActive || totalItems == 0) ? _showAddMenu : null,
+                onTap:
+                    (!isFilterActive || totalItems == 0) ? _showAddMenu : null,
                 splashColor: AppTheme.accent.withOpacity(0.1),
                 highlightColor: AppTheme.accent.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(AppTheme.radius),
-              child: Container(
-                width: double.infinity,
-                constraints: const BoxConstraints(minHeight: 300),
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Column(
+                child: Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(minHeight: 300),
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       // Vibrant icon with gradient background
                       Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppTheme.accent.withOpacity(0.2),
-                          AppTheme.accent.withOpacity(0.1),
-                        ],
-                      ),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.accent.withOpacity(0.2),
-                          blurRadius: 20,
-                          spreadRadius: 5,
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              AppTheme.accent.withOpacity(0.2),
+                              AppTheme.accent.withOpacity(0.1),
+                            ],
+                          ),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.accent.withOpacity(0.2),
+                              blurRadius: 20,
+                              spreadRadius: 5,
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Icon(
-                      isFilterActive ? Icons.filter_alt_outlined : Icons.lock_outline,
-                      size: 60,
-                      color: AppTheme.accent,
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  Text(
-                    isFilterActive
-                        ? 'No ${selectedAlbum.name.toLowerCase()} found'
-                        : 'Your vault is empty',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.text,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (isFilterActive && totalItems > 0)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Text(
-                        'Try selecting a different filter or clear the filter to see all items',
-                        textAlign: TextAlign.center,
+                        child: Icon(
+                          isFilterActive
+                              ? Icons.filter_alt_outlined
+                              : Icons.lock_outline,
+                          size: 60,
+                          color: AppTheme.accent,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        isFilterActive
+                            ? 'No ${selectedAlbum.name.toLowerCase()} found'
+                            : 'Your vault is empty',
                         style: TextStyle(
-                          fontSize: 15,
-                          color: AppTheme.text.withOpacity(0.6),
-                          height: 1.5,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.text,
+                          letterSpacing: 0.5,
                         ),
                       ),
-                    )
-                  else if (isFilterActive && totalItems == 0)
-                    Text(
-                      'Your vault is empty',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: AppTheme.text.withOpacity(0.6),
-                      ),
-                    )
-                  else
-                    Column(
-                      children: [
+                      const SizedBox(height: 12),
+                      if (isFilterActive && totalItems > 0)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Text(
+                            'Try selecting a different filter or clear the filter to see all items',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: AppTheme.text.withOpacity(0.6),
+                              height: 1.5,
+                            ),
+                          ),
+                        )
+                      else if (isFilterActive && totalItems == 0)
                         Text(
-                          'Start protecting your files',
-                          textAlign: TextAlign.center,
+                          'Your vault is empty',
                           style: TextStyle(
                             fontSize: 15,
                             color: AppTheme.text.withOpacity(0.6),
-                            height: 1.5,
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                AppTheme.accent.withOpacity(0.2),
-                                AppTheme.accent.withOpacity(0.1),
-                              ],
+                        )
+                      else
+                        Column(
+                          children: [
+                            Text(
+                              'Start protecting your files',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: AppTheme.text.withOpacity(0.6),
+                                height: 1.5,
+                              ),
                             ),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: AppTheme.accent.withOpacity(0.3),
-                              width: 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.add_circle_outline, color: AppTheme.accent, size: 18),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Tap here to add files',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: AppTheme.accent,
-                                  fontWeight: FontWeight.w600,
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    AppTheme.accent.withOpacity(0.2),
+                                    AppTheme.accent.withOpacity(0.1),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: AppTheme.accent.withOpacity(0.3),
+                                  width: 1,
                                 ),
                               ),
-                            ],
-                          ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.add_circle_outline,
+                                      color: AppTheme.accent, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Tap here to add files',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: AppTheme.accent,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
                     ],
                   ),
                 ),
@@ -1498,7 +1575,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.transparent,
                     shadowColor: Colors.transparent,
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 32, vertical: 16),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
@@ -1520,10 +1598,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Widget _buildAlbumSelector(VaultService vaultService) {
     final albums = vaultService.albums;
-    
+
     return Container(
       height: 80,
       decoration: BoxDecoration(
@@ -1554,7 +1632,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         itemCount: albums.length + 1, // +1 for create button
         cacheExtent: 100, // Limit off-screen rendering for horizontal list
-        addAutomaticKeepAlives: false, // Don't keep items alive when scrolled away
+        addAutomaticKeepAlives:
+            false, // Don't keep items alive when scrolled away
         addRepaintBoundaries: true, // Isolate repaints for better performance
         itemBuilder: (context, index) {
           // Show create button at the end
@@ -1566,7 +1645,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           final itemCount = album.id.startsWith('smart_')
               ? vaultService.getSmartAlbumItems(album.id).length
               : album.itemIds.length;
-          
+
           return Padding(
             padding: const EdgeInsets.only(right: 10),
             child: AnimatedContainer(
@@ -1580,7 +1659,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     setState(() {
                       if (isSelected) {
                         _selectedAlbumId = 'smart_recent';
-      } else {
+                      } else {
                         _selectedAlbumId = album.id;
                       }
                       _selectedItemIds.clear();
@@ -1588,7 +1667,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     });
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
                       gradient: isSelected
                           ? LinearGradient(
@@ -1642,14 +1722,16 @@ class _VaultHomePageState extends State<VaultHomePage> {
                           album.name,
                           style: TextStyle(
                             color: isSelected ? AppTheme.accent : AppTheme.text,
-                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                            fontWeight:
+                                isSelected ? FontWeight.w700 : FontWeight.w600,
                             fontSize: 14,
                             letterSpacing: 0.3,
                           ),
                         ),
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? AppTheme.accent.withOpacity(0.2)
@@ -1659,7 +1741,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
                           child: Text(
                             '$itemCount',
                             style: TextStyle(
-                              color: isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.7),
+                              color: isSelected
+                                  ? AppTheme.accent
+                                  : AppTheme.text.withOpacity(0.7),
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
@@ -1748,12 +1832,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
                   });
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.accent.withOpacity(0.2) : AppTheme.surfaceVariant,
+                    color: isSelected
+                        ? AppTheme.accent.withOpacity(0.2)
+                        : AppTheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: isSelected ? AppTheme.accent : AppTheme.divider.withOpacity(0.3),
+                      color: isSelected
+                          ? AppTheme.accent
+                          : AppTheme.divider.withOpacity(0.3),
                       width: isSelected ? 2 : 1,
                     ),
                   ),
@@ -1763,13 +1852,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
                       Icon(
                         Icons.local_offer_outlined,
                         size: 16,
-                        color: isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.7),
+                        color: isSelected
+                            ? AppTheme.accent
+                            : AppTheme.text.withOpacity(0.7),
                       ),
                       const SizedBox(width: 8),
                       Text(
                         'All',
                         style: TextStyle(
-                          color: isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
+                          color: isSelected
+                              ? AppTheme.accent
+                              : AppTheme.text.withOpacity(0.8),
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
                         ),
@@ -1805,7 +1898,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
                   color: color,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: isSelected ? AppTheme.accent : Colors.white.withOpacity(0.85),
+                    color: isSelected
+                        ? AppTheme.accent
+                        : Colors.white.withOpacity(0.85),
                     width: isSelected ? 3 : 2,
                   ),
                   boxShadow: [
@@ -1824,8 +1919,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
-  Widget _buildFilesViewWithFolderOption(List<VaultItem> items, VaultService vaultService) {
+
+  Widget _buildFilesViewWithFolderOption(
+      List<VaultItem> items, VaultService vaultService) {
     return Column(
       children: [
         // Add folder button at top
@@ -1852,7 +1948,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ],
     );
   }
-  
+
   Widget _buildEmptyStateWithFolderOption(VaultService vaultService) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -1906,7 +2002,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
       itemCount: items.length,
       // Use lazy loading - only build visible items
       cacheExtent: 200, // Reduced from 500 to minimize off-screen rendering
-      addAutomaticKeepAlives: false, // Don't keep items alive when scrolled away
+      addAutomaticKeepAlives:
+          false, // Don't keep items alive when scrolled away
       addRepaintBoundaries: true, // Isolate repaints for better performance
       itemBuilder: (context, index) {
         final item = items[index];
@@ -1923,13 +2020,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
       },
     );
   }
-  
+
   Widget _buildBreadcrumb(VaultService vaultService) {
     final folder = vaultService.folders.firstWhere(
       (f) => f.id == _currentFolderId,
       orElse: () => throw StateError('Folder not found'),
     );
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -1967,8 +2064,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
-  Widget _buildRootView(List<VaultFolder> folders, List<VaultItem> items, VaultService vaultService) {
+
+  Widget _buildRootView(List<VaultFolder> folders, List<VaultItem> items,
+      VaultService vaultService) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1994,7 +2092,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
                       const SizedBox(width: 8),
                       IconButton(
                         icon: Icon(
-                          _foldersMinimized ? Icons.expand_more : Icons.expand_less,
+                          _foldersMinimized
+                              ? Icons.expand_more
+                              : Icons.expand_less,
                           size: 20,
                         ),
                         onPressed: () {
@@ -2003,7 +2103,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
                           });
                           _saveFoldersMinimized(_foldersMinimized);
                         },
-                        tooltip: _foldersMinimized ? 'Expand folders' : 'Minimize folders',
+                        tooltip: _foldersMinimized
+                            ? 'Expand folders'
+                            : 'Minimize folders',
                         color: AppTheme.text.withOpacity(0.7),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
@@ -2029,133 +2131,142 @@ class _VaultHomePageState extends State<VaultHomePage> {
             child: _foldersMinimized
                 ? const SizedBox.shrink()
                 : ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: folders.length + 1, // +1 for create folder button
-              itemBuilder: (context, index) {
-                if (index == folders.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: SizedBox(
-                      width: 150,
-                      child: _buildCreateFolderButton(vaultService),
-                    ),
-                  );
-                }
-                final folder = folders[index];
-                final itemCount = folder.itemIds.length;
-                
-                return Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: SizedBox(
-                    width: 150,
-                    child: Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: InkWell(
-                        onTap: () {
-                          setState(() {
-                            _currentFolderId = folder.id;
-                          });
-                        },
-                        onLongPress: () {
-                          _showFolderOptionsDialog(context, folder, vaultService);
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Stack(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount:
+                        folders.length + 1, // +1 for create folder button
+                    itemBuilder: (context, index) {
+                      if (index == folders.length) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: SizedBox(
+                            width: 150,
+                            child: _buildCreateFolderButton(vaultService),
+                          ),
+                        );
+                      }
+                      final folder = folders[index];
+                      final itemCount = folder.itemIds.length;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 16),
+                        child: SizedBox(
+                          width: 150,
+                          child: Card(
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _currentFolderId = folder.id;
+                                });
+                              },
+                              onLongPress: () {
+                                _showFolderOptionsDialog(
+                                    context, folder, vaultService);
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
                                 children: [
-                                  Icon(
-                                    Icons.folder,
-                                    size: 48,
-                                    color: AppTheme.accent,
+                                  Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.folder,
+                                          size: 48,
+                                          color: AppTheme.accent,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Flexible(
+                                          child: Text(
+                                            folder.name,
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppTheme.text,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '$itemCount ${itemCount == 1 ? 'item' : 'items'}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color:
+                                                AppTheme.text.withOpacity(0.6),
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  Flexible(
-                                    child: Text(
-                                      folder.name,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppTheme.text,
+                                  // Delete button in top right corner
+                                  Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: Tooltip(
+                                      message: 'Folder options',
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () {
+                                            _showFolderOptionsDialog(
+                                                context, folder, vaultService);
+                                          },
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.surface
+                                                  .withOpacity(0.9),
+                                              shape: BoxShape.circle,
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withOpacity(0.1),
+                                                  blurRadius: 4,
+                                                  offset: const Offset(0, 2),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Icon(
+                                              Icons.more_vert,
+                                              size: 20,
+                                              color: AppTheme.text,
+                                            ),
+                                          ),
+                                        ),
                                       ),
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '$itemCount ${itemCount == 1 ? 'item' : 'items'}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: AppTheme.text.withOpacity(0.6),
-                                    ),
-                                    textAlign: TextAlign.center,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
                               ),
                             ),
-                            // Delete button in top right corner
-                            Positioned(
-                              top: 4,
-                              right: 4,
-                              child: Tooltip(
-                                message: 'Folder options',
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () {
-                                      _showFolderOptionsDialog(context, folder, vaultService);
-                                    },
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.surface.withOpacity(0.9),
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(0.1),
-                                            blurRadius: 4,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Icon(
-                                        Icons.more_vert,
-                                        size: 20,
-                                        color: AppTheme.text,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
           if (!_foldersMinimized) const SizedBox(height: 16),
         ],
         // Files section
         if (items.isNotEmpty) ...[
           Padding(
-            padding: EdgeInsets.fromLTRB(16, folders.isNotEmpty ? 0.0 : 16.0, 16, 8),
+            padding:
+                EdgeInsets.fromLTRB(16, folders.isNotEmpty ? 0.0 : 16.0, 16, 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -2181,7 +2292,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         });
                         _saveFilesMinimized(_filesMinimized);
                       },
-                      tooltip: _filesMinimized ? 'Expand files' : 'Minimize files',
+                      tooltip:
+                          _filesMinimized ? 'Expand files' : 'Minimize files',
                       color: AppTheme.text.withOpacity(0.7),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -2202,7 +2314,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ),
           if (!_filesMinimized)
             Expanded(
-              child: _isGridView ? _buildGridView(items) : _buildListView(items),
+              child:
+                  _isGridView ? _buildGridView(items) : _buildListView(items),
             ),
         ] else if (folders.isEmpty) ...[
           Expanded(
@@ -2212,8 +2325,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ],
     );
   }
-  
-  Widget _buildFoldersView(List<VaultFolder> folders, VaultService vaultService) {
+
+  Widget _buildFoldersView(
+      List<VaultFolder> folders, VaultService vaultService) {
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -2229,7 +2343,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         }
         final folder = folders[index];
         final itemCount = folder.itemIds.length;
-        
+
         return Card(
           elevation: 2,
           shape: RoundedRectangleBorder(
@@ -2305,7 +2419,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                       color: Colors.transparent,
                       child: InkWell(
                         onTap: () {
-                          _showFolderOptionsDialog(context, folder, vaultService);
+                          _showFolderOptionsDialog(
+                              context, folder, vaultService);
                         },
                         borderRadius: BorderRadius.circular(20),
                         child: Container(
@@ -2338,7 +2453,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       },
     );
   }
-  
+
   Widget _buildCreateFolderButton(VaultService vaultService) {
     return Card(
       elevation: 2,
@@ -2384,10 +2499,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Future<void> _showCreateFolderDialog(VaultService vaultService) async {
     final nameController = TextEditingController();
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2436,10 +2551,11 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (result != null && result.isNotEmpty) {
       try {
-        await vaultService.createFolder(result, parentFolderId: _currentFolderId);
+        await vaultService.createFolder(result,
+            parentFolderId: _currentFolderId);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -2449,7 +2565,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           );
         }
       } catch (e) {
-          if (mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error creating folder: $e'),
@@ -2460,10 +2576,11 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
-  Future<void> _showRenameFolderDialog(BuildContext context, VaultFolder folder, VaultService vaultService) async {
+
+  Future<void> _showRenameFolderDialog(BuildContext context, VaultFolder folder,
+      VaultService vaultService) async {
     final nameController = TextEditingController(text: folder.name);
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2518,7 +2635,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (result != null && result.isNotEmpty && result != folder.name) {
       try {
         final success = await vaultService.renameFolder(folder.id, result);
@@ -2542,11 +2659,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   /// Show rename item dialog
-  Future<void> _showRenameItemDialog(BuildContext context, VaultItem item, VaultService vaultService) async {
+  Future<void> _showRenameItemDialog(
+      BuildContext context, VaultItem item, VaultService vaultService) async {
     final nameController = TextEditingController(text: item.displayName);
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2601,7 +2719,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (result != null && result.isNotEmpty && result != item.displayName) {
       try {
         final success = await vaultService.renameItem(item.id, result);
@@ -2633,9 +2751,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   /// Show item options dialog (rename, delete, etc.)
-  Future<void> _showItemOptionsDialog(BuildContext context, VaultItem item, VaultService vaultService) async {
+  Future<void> _showItemOptionsDialog(
+      BuildContext context, VaultItem item, VaultService vaultService) async {
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2666,20 +2785,23 @@ class _VaultHomePageState extends State<VaultHomePage> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.local_offer_outlined, color: AppTheme.accent),
+              leading: const Icon(Icons.local_offer_outlined,
+                  color: AppTheme.accent),
               title: const Text(
                 'Tags',
                 style: TextStyle(color: AppTheme.text),
               ),
               subtitle: Text(
                 _formatTagSummary(vaultService.getItemTagIds(item.id)),
-                style: TextStyle(color: AppTheme.text.withOpacity(0.6), fontSize: 12),
+                style: TextStyle(
+                    color: AppTheme.text.withOpacity(0.6), fontSize: 12),
               ),
               onTap: () => Navigator.of(context).pop('tags'),
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: AppTheme.warning),
+              leading:
+                  const Icon(Icons.delete_outline, color: AppTheme.warning),
               title: const Text(
                 'Delete',
                 style: TextStyle(color: AppTheme.warning),
@@ -2699,7 +2821,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (result == 'rename') {
       // Show rename dialog
       await _showRenameItemDialog(context, item, vaultService);
@@ -2748,7 +2870,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ],
         ),
       );
-      
+
       if (confirm == true && mounted) {
         try {
           final success = await vaultService.deleteItem(item.id);
@@ -2781,8 +2903,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
-  Future<void> _showFolderOptionsDialog(BuildContext context, VaultFolder folder, VaultService vaultService) async {
+
+  Future<void> _showFolderOptionsDialog(BuildContext context,
+      VaultFolder folder, VaultService vaultService) async {
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2819,7 +2942,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.delete_outline, color: AppTheme.warning),
+              leading:
+                  const Icon(Icons.delete_outline, color: AppTheme.warning),
               title: const Text(
                 'Delete Folder',
                 style: TextStyle(color: AppTheme.warning),
@@ -2839,7 +2963,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (result == 'rename') {
       // Show rename dialog
       await _showRenameFolderDialog(context, folder, vaultService);
@@ -2888,7 +3012,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ],
         ),
       );
-      
+
       if (confirm == true && mounted) {
         try {
           final success = await vaultService.deleteFolder(folder.id);
@@ -2899,7 +3023,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
                 _currentFolderId = null;
               });
             }
-            
+
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -2939,7 +3063,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
     return '${ids.length} tags';
   }
 
-  Future<void> _showTagsDialog(BuildContext context, VaultItem item, VaultService vaultService) async {
+  Future<void> _showTagsDialog(
+      BuildContext context, VaultItem item, VaultService vaultService) async {
     final selected = vaultService.getItemTagIds(item.id).toSet();
 
     await showDialog<void>(
@@ -2954,7 +3079,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
               ),
               title: const Text(
                 'Tags',
-                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                    color: AppTheme.text, fontWeight: FontWeight.w700),
               ),
               content: Wrap(
                 spacing: 10,
@@ -2981,7 +3107,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         color: color,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isSelected ? AppTheme.accent : Colors.white.withOpacity(0.9),
+                          color: isSelected
+                              ? AppTheme.accent
+                              : Colors.white.withOpacity(0.9),
                           width: isSelected ? 4 : 2,
                         ),
                         boxShadow: [
@@ -2993,7 +3121,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         ],
                       ),
                       child: isSelected
-                          ? const Icon(Icons.check, color: Colors.white, size: 18)
+                          ? const Icon(Icons.check,
+                              color: Colors.white, size: 18)
                           : null,
                     ),
                   );
@@ -3009,10 +3138,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    final ok = await vaultService.setItemTagIds(item.id, selected.toList());
+                    final ok = await vaultService.setItemTagIds(
+                        item.id, selected.toList());
                     if (mounted && ok) {
                       Navigator.of(context).pop();
-                      setState(() {}); // refresh tag dots without waiting on listeners
+                      setState(
+                          () {}); // refresh tag dots without waiting on listeners
                     } else {
                       Navigator.of(context).pop();
                     }
@@ -3036,7 +3167,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       cacheExtent: 200, // Reduced cache extent for better performance
-      addAutomaticKeepAlives: false, // Don't keep items alive when scrolled away
+      addAutomaticKeepAlives:
+          false, // Don't keep items alive when scrolled away
       addRepaintBoundaries: true, // Isolate repaints for better performance
       itemBuilder: (context, index) {
         final item = items[index];
@@ -3053,16 +3185,16 @@ class _VaultHomePageState extends State<VaultHomePage> {
       },
     );
   }
-  
+
   Widget _buildGridItem(VaultItem item) {
     final isSelected = _selectedItemIds.contains(item.id);
     final tagIds = _getItemTagIds(item);
-    
+
     return GestureDetector(
       onTap: () {
         if (_isSelectionMode) {
           _toggleItemSelection(item.id);
-          } else {
+        } else {
           _openItem(item);
         }
       },
@@ -3171,7 +3303,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                 right: 6,
                 child: IgnorePointer(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
@@ -3190,7 +3323,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.play_arrow, color: Colors.white, size: 12),
+                        const Icon(Icons.play_arrow,
+                            color: Colors.white, size: 12),
                         const SizedBox(width: 2),
                         Text(
                           _formatDuration(item.durationMs),
@@ -3228,7 +3362,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         ),
                       ],
                     ),
-                    child: const Icon(Icons.image, color: Colors.white, size: 12),
+                    child:
+                        const Icon(Icons.image, color: Colors.white, size: 12),
                   ),
                 ),
               ),
@@ -3255,7 +3390,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         ),
                       ],
                     ),
-                    child: const Icon(Icons.music_note, color: Colors.white, size: 12),
+                    child: const Icon(Icons.music_note,
+                        color: Colors.white, size: 12),
                   ),
                 ),
               ),
@@ -3265,7 +3401,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
               right: 6,
               child: GestureDetector(
                 onTap: () {
-                  final vaultService = Provider.of<VaultService>(context, listen: false);
+                  final vaultService =
+                      Provider.of<VaultService>(context, listen: false);
                   _showItemOptionsDialog(context, item, vaultService);
                 },
                 child: Container(
@@ -3294,7 +3431,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   // Cache type colors to avoid repeated lookups
   static final Map<VaultItemType, Color> _typeColorCache = {
     VaultItemType.photo: Colors.blue,
@@ -3303,15 +3440,15 @@ class _VaultHomePageState extends State<VaultHomePage> {
     VaultItemType.document: Colors.orange,
     VaultItemType.archive: Colors.brown,
   };
-  
+
   Color _getTypeColor(VaultItemType type) {
     return _typeColorCache[type] ?? AppTheme.accent;
   }
-  
+
   Widget _buildListItem(VaultItem item) {
     final isSelected = _selectedItemIds.contains(item.id);
     final tagIds = _getItemTagIds(item);
-    
+
     // Build the child widget once
     final child = Material(
       color: Colors.transparent,
@@ -3339,7 +3476,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         },
         child: Padding(
           padding: const EdgeInsets.all(12),
-            child: Row(
+          child: Row(
             children: [
               // Thumbnail with vibrant border (and video duration overlay)
               SizedBox(
@@ -3378,7 +3515,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         right: 4,
                         child: IgnorePointer(
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.black.withOpacity(0.75),
                               borderRadius: BorderRadius.circular(3),
@@ -3386,7 +3524,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.play_arrow, color: Colors.white, size: 10),
+                                const Icon(Icons.play_arrow,
+                                    color: Colors.white, size: 10),
                                 const SizedBox(width: 2),
                                 Text(
                                   _formatDuration(item.durationMs),
@@ -3412,7 +3551,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                               color: Colors.blue.withOpacity(0.85),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.image, color: Colors.white, size: 10),
+                            child: const Icon(Icons.image,
+                                color: Colors.white, size: 10),
                           ),
                         ),
                       ),
@@ -3447,7 +3587,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
                             color: _getTypeColor(item.type).withOpacity(0.2),
                             borderRadius: BorderRadius.circular(4),
@@ -3514,8 +3655,11 @@ class _VaultHomePageState extends State<VaultHomePage> {
                               size: 20,
                             ),
                             onPressed: () {
-                              final vaultService = Provider.of<VaultService>(context, listen: false);
-                              _showItemOptionsDialog(context, item, vaultService);
+                              final vaultService = Provider.of<VaultService>(
+                                  context,
+                                  listen: false);
+                              _showItemOptionsDialog(
+                                  context, item, vaultService);
                             },
                             tooltip: 'More options',
                           ),
@@ -3525,7 +3669,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ),
       ),
     );
-    
+
     // Use regular Container when not selected for better performance
     if (isSelected) {
       return AnimatedContainer(
@@ -3572,7 +3716,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       );
     }
   }
-  
+
   // Cache type labels to avoid repeated lookups
   static const Map<VaultItemType, String> _typeLabelCache = {
     VaultItemType.photo: 'PHOTO',
@@ -3581,18 +3725,18 @@ class _VaultHomePageState extends State<VaultHomePage> {
     VaultItemType.document: 'DOC',
     VaultItemType.archive: 'ZIP',
   };
-  
+
   String _getTypeLabel(VaultItemType type) {
     return _typeLabelCache[type] ?? 'FILE';
   }
-  
+
   Widget _buildItemThumbnail(VaultItem item) {
     // For all types including videos, use static thumbnail with caching
     // Videos will have thumbnails generated automatically when stored
     // Check for thumbnail using effectiveThumbnailPath (handles both new and legacy)
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final thumbnailPath = vaultService.getThumbnailPath(item.id);
-    
+
     if (thumbnailPath != null) {
       final thumbnailFile = File(thumbnailPath);
       if (thumbnailFile.existsSync()) {
@@ -3608,7 +3752,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
             return _buildPlaceholder(item);
           },
           errorBuilder: (context, error, stackTrace) {
-            debugPrint('[VaultHomePage] Error loading thumbnail for ${item.id}: $error');
+            debugPrint(
+                '[VaultHomePage] Error loading thumbnail for ${item.id}: $error');
             return _buildPlaceholder(item);
           },
         );
@@ -3633,14 +3778,15 @@ class _VaultHomePageState extends State<VaultHomePage> {
               return _buildPlaceholder(item);
             },
             errorBuilder: (context, error, stackTrace) {
-              debugPrint('[VaultHomePage] Error loading photo preview for ${item.id}: $error');
+              debugPrint(
+                  '[VaultHomePage] Error loading photo preview for ${item.id}: $error');
               return _buildPlaceholder(item);
             },
           );
         }
       }
     }
-    
+
     // If no thumbnail exists yet, show placeholder
     // Thumbnails will be generated in the background
     if (item.type == VaultItemType.photo) {
@@ -3649,7 +3795,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
     return _buildPlaceholder(item);
   }
 
-  void _queueThumbnailGenerationIfNeeded(VaultService vaultService, String itemId) {
+  void _queueThumbnailGenerationIfNeeded(
+      VaultService vaultService, String itemId) {
     if (_requestedMissingThumbnails.contains(itemId)) return;
     _requestedMissingThumbnails.add(itemId);
 
@@ -3657,16 +3804,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
       try {
         await vaultService.generateThumbnailForItem(itemId);
       } catch (e) {
-        debugPrint('[VaultHomePage] Thumbnail generation failed for $itemId: $e');
+        debugPrint(
+            '[VaultHomePage] Thumbnail generation failed for $itemId: $e');
       }
       if (mounted) setState(() {});
     });
   }
-  
+
   Widget _buildPlaceholder(VaultItem item) {
     IconData icon;
     Color color;
-    
+
     switch (item.type) {
       case VaultItemType.photo:
         icon = Icons.image;
@@ -3692,7 +3840,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         icon = Icons.insert_drive_file;
         color = AppTheme.text.withOpacity(0.5);
     }
-    
+
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -3744,20 +3892,21 @@ class _VaultHomePageState extends State<VaultHomePage> {
             decoration: BoxDecoration(
               color: c,
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.9), width: 1),
+              border:
+                  Border.all(color: Colors.white.withOpacity(0.9), width: 1),
             ),
           );
         }),
       ),
     );
   }
-  
+
   /// Preload thumbnail for adjacent items to improve scroll performance
   /// Uses path-based precaching (no memory loading)
   void _preloadThumbnail(VaultItem item) {
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final thumbnailPath = vaultService.getThumbnailPath(item.id);
-    
+
     if (thumbnailPath != null) {
       final thumbnailFile = File(thumbnailPath);
       if (thumbnailFile.existsSync()) {
@@ -3768,11 +3917,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
@@ -3789,13 +3939,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
     }
     return '$m:${s.toString().padLeft(2, '0')}';
   }
-  
+
   void _openItem(VaultItem item) {
     final items = _getDisplayItems();
     final index = items.indexWhere((i) => i.id == item.id);
-    
+
     Navigator.of(context).push(
-        MaterialPageRoute(
+      MaterialPageRoute(
         builder: (context) => VaultItemDetailPage(
           item: item,
           allItems: items,
@@ -3804,13 +3954,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Future<void> _downloadAlbum(String albumId) async {
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final albumItems = albumId.startsWith('smart_')
         ? vaultService.getSmartAlbumItems(albumId)
         : vaultService.getAlbumItems(albumId);
-    
+
     if (albumItems.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3820,12 +3970,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ),
         );
       }
-        return;
-      }
-    
+      return;
+    }
+
     await _downloadItems(albumItems.map((item) => item.id).toSet());
   }
-  
+
   Widget _buildImportProgressIndicator() {
     return Positioned(
       bottom: 0,
@@ -3869,9 +4019,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
                         child: LinearProgressIndicator(
                           // If we're still starting up (queued but first file hasn't reported yet),
                           // show an indeterminate animation so the user sees activity immediately.
-                          value: _importProgress > 0 ? (_importProgress / _importTotal) : null,
+                          value: _importProgress > 0
+                              ? (_importProgress / _importTotal)
+                              : null,
                           backgroundColor: AppTheme.divider,
-                          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(AppTheme.accent),
                           minHeight: 6,
                         ),
                       ),
@@ -3895,7 +4048,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
                       height: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(AppTheme.accent),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -3916,7 +4070,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Widget _buildCreateAlbumButton(VaultService vaultService) {
     return Padding(
       padding: const EdgeInsets.only(right: 10),
@@ -3961,10 +4115,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   void _showCreateAlbumDialog(VaultService vaultService) {
     final TextEditingController nameController = TextEditingController();
-    
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -4040,7 +4194,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Future<void> _createAlbum(VaultService vaultService, String name) async {
     try {
       // Check if album name already exists
@@ -4048,30 +4202,30 @@ class _VaultHomePageState extends State<VaultHomePage> {
         (album) => album.name.toLowerCase() == name.toLowerCase(),
         orElse: () => Album(id: '', name: '', createdAt: DateTime.now()),
       );
-      
+
       if (existingAlbum.id.isNotEmpty) {
         if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
               content: Text('Album "$name" already exists'),
-        backgroundColor: AppTheme.warning,
+              backgroundColor: AppTheme.warning,
             ),
           );
         }
         return;
       }
-      
+
       final album = await vaultService.createAlbum(name);
-      
+
       if (mounted) {
         setState(() {
           _selectedAlbumId = album.id;
         });
-        
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
             content: Text('Album "$name" created'),
-        backgroundColor: AppTheme.accent,
+            backgroundColor: AppTheme.accent,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -4088,19 +4242,19 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   Future<void> _deleteAlbum(String albumId) async {
     // Don't delete smart albums
     if (albumId.startsWith('smart_')) return;
-    
+
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final album = vaultService.albums.firstWhere(
       (a) => a.id == albumId,
       orElse: () => Album(id: '', name: '', createdAt: DateTime.now()),
     );
-    
+
     if (album.id.isEmpty) return;
-    
+
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
@@ -4111,7 +4265,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ),
         title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: AppTheme.warning, size: 28),
+            Icon(Icons.warning_amber_rounded,
+                color: AppTheme.warning, size: 28),
             const SizedBox(width: 12),
             const Text(
               'Delete Album',
@@ -4133,7 +4288,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
               'Cancel',
               style: TextStyle(
                 color: AppTheme.text.withOpacity(0.6),
-          ),
+              ),
             ),
           ),
           ElevatedButton(
@@ -4152,10 +4307,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (confirmed == true) {
       final deleted = await vaultService.deleteAlbum(albumId);
-      
+
       if (mounted) {
         if (deleted) {
           setState(() {
@@ -4164,7 +4319,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
               _selectedAlbumId = 'smart_recent';
             }
           });
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Album "${album.name}" deleted'),
@@ -4172,7 +4327,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
               duration: const Duration(seconds: 2),
             ),
           );
-      } else {
+        } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Error deleting album'),
@@ -4183,7 +4338,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   void _showPaywall() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -4191,19 +4346,21 @@ class _VaultHomePageState extends State<VaultHomePage> {
       ),
     );
   }
-  
+
   Future<void> _downloadAll() async {
-    final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
-    
+    final subscriptionService =
+        Provider.of<SubscriptionService>(context, listen: false);
+    final hasPremium = subscriptionService.currentTier.isUnlimited ||
+        subscriptionService.isInTrial;
+
     if (!hasPremium) {
       _showPaywall();
       return;
     }
-    
+
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final allItems = vaultService.items;
-    
+
     if (allItems.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4215,7 +4372,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
       return;
     }
-    
+
     // Show confirmation dialog
     final shouldDownload = await showDialog<bool>(
       context: context,
@@ -4247,7 +4404,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (shouldDownload != true) return;
 
     // Use the same download logic as _downloadSelected but with all items
@@ -4259,13 +4416,14 @@ class _VaultHomePageState extends State<VaultHomePage> {
     await _downloadItems(_selectedItemIds, clearSelection: true);
   }
 
-  Future<void> _downloadItems(Set<String> itemIds, {bool clearSelection = false}) async {
+  Future<void> _downloadItems(Set<String> itemIds,
+      {bool clearSelection = false}) async {
     if (itemIds.isEmpty) return;
 
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
     final masterKey = authService.masterKey;
-    
+
     if (masterKey == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4277,7 +4435,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
       return;
     }
-    
+
     // Show progress dialog
     if (mounted) {
       showDialog(
@@ -4316,12 +4474,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
           (i) => i.id == itemId,
           orElse: () => throw Exception('Item not found'),
         );
-        
+
         if (item.type == VaultItemType.photo) {
           photos.add(item);
         } else if (item.type == VaultItemType.video) {
           videos.add(item);
-      } else {
+        } else {
           otherFiles.add(item);
         }
       }
@@ -4334,37 +4492,43 @@ class _VaultHomePageState extends State<VaultHomePage> {
         // Try to request permission, but don't block or show errors based on this check
         // We'll check the actual save result instead to determine if permission is really denied
         await _permissionService.requestPhotoLibraryAddPermission();
-      } else if ((photos.isNotEmpty || videos.isNotEmpty) && Platform.isAndroid) {
+      } else if ((photos.isNotEmpty || videos.isNotEmpty) &&
+          Platform.isAndroid) {
         // Android: Request storage permission
-        final isPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.storage);
-        
+        final isPermanentlyDenied =
+            await _permissionService.isPermanentlyDenied(Permission.storage);
+
         if (isPermanentlyDenied) {
           if (mounted) {
             Navigator.pop(context); // Close progress dialog
             final shouldOpen = await _showPermissionDialog(
               title: 'Storage Access Needed',
-              message: 'To save photos and videos, Nyx needs storage access.\n\nPlease enable storage access in Settings.',
+              message:
+                  'To save photos and videos, Nyx needs storage access.\n\nPlease enable storage access in Settings.',
             );
-            
+
             if (shouldOpen == true) {
               await _permissionService.openSettings();
             }
           }
           return;
         }
-        
-        final granted = await _permissionService.isPhotoLibraryAddGranted() || await _permissionService.requestPhotoLibraryAddPermission();
-        
+
+        final granted = await _permissionService.isPhotoLibraryAddGranted() ||
+            await _permissionService.requestPhotoLibraryAddPermission();
+
         if (!granted) {
-          final isNowPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.storage);
-          
+          final isNowPermanentlyDenied =
+              await _permissionService.isPermanentlyDenied(Permission.storage);
+
           if (isNowPermanentlyDenied && mounted) {
             Navigator.pop(context); // Close progress dialog
             final shouldOpen = await _showPermissionDialog(
               title: 'Storage Access Needed',
-              message: 'To save photos and videos, Nyx needs storage access.\n\nPlease enable storage access in Settings.',
+              message:
+                  'To save photos and videos, Nyx needs storage access.\n\nPlease enable storage access in Settings.',
             );
-            
+
             if (shouldOpen == true) {
               await _permissionService.openSettings();
             }
@@ -4372,7 +4536,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
             Navigator.pop(context); // Close progress dialog
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Storage permission is required to save photos/videos'),
+                content: Text(
+                    'Storage permission is required to save photos/videos'),
                 backgroundColor: AppTheme.warning,
               ),
             );
@@ -4385,25 +4550,27 @@ class _VaultHomePageState extends State<VaultHomePage> {
       int photoFailures = 0;
       for (final item in photos) {
         try {
-          final fileData = await vaultService.getFileData(item.id, masterKey: masterKey);
+          final fileData =
+              await vaultService.getFileData(item.id, masterKey: masterKey);
           if (fileData != null) {
             final tempDir = await getTemporaryDirectory();
             final extension = item.extension ?? 'jpg';
-            final tempFile = File('${tempDir.path}/download_${item.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
+            final tempFile = File(
+                '${tempDir.path}/download_${item.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
             await tempFile.writeAsBytes(fileData);
-            
+
             final result = await PhotoManager.editor.saveImageWithPath(
               tempFile.path,
               title: item.displayName,
             );
-            
+
             if (result != null) {
               successCount++;
-          } else {
-          failCount++;
-          photoFailures++;
-          }
-          
+            } else {
+              failCount++;
+              photoFailures++;
+            }
+
             tempFile.delete().catchError((_) async => tempFile);
           } else {
             failCount++;
@@ -4420,25 +4587,27 @@ class _VaultHomePageState extends State<VaultHomePage> {
       int videoFailures = 0;
       for (final item in videos) {
         try {
-          final fileData = await vaultService.getFileData(item.id, masterKey: masterKey);
+          final fileData =
+              await vaultService.getFileData(item.id, masterKey: masterKey);
           if (fileData != null) {
             final tempDir = await getTemporaryDirectory();
             final extension = item.extension ?? 'mp4';
-            final tempFile = File('${tempDir.path}/download_${item.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
+            final tempFile = File(
+                '${tempDir.path}/download_${item.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
             await tempFile.writeAsBytes(fileData);
-            
+
             final result = await PhotoManager.editor.saveVideo(
               tempFile,
               title: item.displayName,
             );
-            
+
             if (result != null) {
-        successCount++;
-          } else {
+              successCount++;
+            } else {
               failCount++;
               videoFailures++;
-          }
-          
+            }
+
             tempFile.delete().catchError((_) async => tempFile);
           } else {
             failCount++;
@@ -4446,33 +4615,40 @@ class _VaultHomePageState extends State<VaultHomePage> {
           }
         } catch (e) {
           debugPrint('[VaultHomePage] Error downloading video: $e');
-        failCount++;
-        videoFailures++;
+          failCount++;
+          videoFailures++;
         }
       }
-      
+
       // Only show permission error if photos/videos actually failed to save
       // and we have failures that might be due to permissions
       // IMPORTANT: Only show if saves actually failed AND permission is actually denied
       // AND we have photos/videos that failed (not just other files)
-      if ((photoFailures > 0 || videoFailures > 0) && Platform.isIOS && mounted && (photos.isNotEmpty || videos.isNotEmpty)) {
+      if ((photoFailures > 0 || videoFailures > 0) &&
+          Platform.isIOS &&
+          mounted &&
+          (photos.isNotEmpty || videos.isNotEmpty)) {
         // First check if permission is actually granted - if it is, don't show the dialog
         // This prevents false positives when permission is actually granted
         final isGranted = await _permissionService.isPhotoLibraryAddGranted();
-        debugPrint('[VaultHomePage] Permission check after download - granted: $isGranted, photoFailures: $photoFailures, videoFailures: $videoFailures');
-        
+        debugPrint(
+            '[VaultHomePage] Permission check after download - granted: $isGranted, photoFailures: $photoFailures, videoFailures: $videoFailures');
+
         if (!isGranted) {
           // Only then check if it's permanently denied
-          final isPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.photosAddOnly);
-          debugPrint('[VaultHomePage] Permission permanently denied: $isPermanentlyDenied');
-          
+          final isPermanentlyDenied = await _permissionService
+              .isPermanentlyDenied(Permission.photosAddOnly);
+          debugPrint(
+              '[VaultHomePage] Permission permanently denied: $isPermanentlyDenied');
+
           if (isPermanentlyDenied) {
             // Show permission dialog only if saves actually failed AND permission is actually denied
             final shouldOpen = await _showPermissionDialog(
               title: 'Photo Library Access Needed',
-              message: 'Some photos or videos could not be saved. Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
+              message:
+                  'Some photos or videos could not be saved. Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
             );
-            
+
             if (shouldOpen == true) {
               await _permissionService.openSettings();
             }
@@ -4480,7 +4656,8 @@ class _VaultHomePageState extends State<VaultHomePage> {
         } else {
           // Permission is granted - don't show dialog even if there were failures
           // Failures might be due to other reasons (file corruption, disk space, etc.)
-          debugPrint('[VaultHomePage] Permission is granted, not showing permission dialog. Failures may be due to other reasons.');
+          debugPrint(
+              '[VaultHomePage] Permission is granted, not showing permission dialog. Failures may be due to other reasons.');
         }
       }
 
@@ -4500,24 +4677,25 @@ class _VaultHomePageState extends State<VaultHomePage> {
 
         for (final item in otherFiles) {
           try {
-            final fileData = await vaultService.getFileData(item.id, masterKey: masterKey);
+            final fileData =
+                await vaultService.getFileData(item.id, masterKey: masterKey);
             if (fileData != null && targetDir != null) {
               final file = File('${targetDir.path}/${item.displayName}');
               await file.writeAsBytes(fileData);
-        successCount++;
+              successCount++;
             } else {
               failCount++;
             }
-      } catch (e) {
+          } catch (e) {
             debugPrint('[VaultHomePage] Error downloading file: $e');
-        failCount++;
+            failCount++;
           }
         }
       }
 
-    if (mounted) {
+      if (mounted) {
         Navigator.pop(context); // Close progress dialog
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -4549,13 +4727,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   Future<void> _moveToFolder() async {
     if (_selectedItemIds.isEmpty) return;
-    
+
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final folders = vaultService.folders;
-    
+
     if (folders.isEmpty) {
       // If no folders exist, ask to create one
       final createFolder = await showDialog<bool>(
@@ -4583,7 +4761,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ],
         ),
       );
-      
+
       if (createFolder == true) {
         await _showCreateFolderDialog(vaultService);
         // Retry after creating folder
@@ -4593,10 +4771,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
       return;
     }
-    
+
     // Show folder selection dialog
     String? selectedFolderId;
-    
+
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -4626,7 +4804,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
                     activeColor: AppTheme.accent,
                   );
                 }
-                
+
                 final folder = folders[index - 1];
                 return RadioListTile<String>(
                   title: Text(folder.name),
@@ -4660,9 +4838,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ),
       ),
     );
-    
+
     if (result != true) return;
-    
+
     try {
       // Move each selected item
       for (final itemId in _selectedItemIds) {
@@ -4672,14 +4850,14 @@ class _VaultHomePageState extends State<VaultHomePage> {
             await vaultService.removeItemFromFolder(itemId, folder.id);
           }
         }
-        
+
         // Then add to selected folder (or leave in root if null)
         if (selectedFolderId != null) {
           await vaultService.addItemToFolder(itemId, selectedFolderId!);
         }
       }
-      
-    if (mounted) {
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -4691,7 +4869,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           ),
         );
       }
-      
+
       setState(() {
         _selectedItemIds.clear();
         _isSelectionMode = false;
@@ -4708,14 +4886,14 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   void _deleteSelected() async {
     if (_selectedItemIds.isEmpty) return;
-    
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-      backgroundColor: AppTheme.surface,
+        backgroundColor: AppTheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
         ),
@@ -4740,174 +4918,187 @@ class _VaultHomePageState extends State<VaultHomePage> {
         ],
       ),
     );
-    
+
     if (confirmed == true) {
       final vaultService = Provider.of<VaultService>(context, listen: false);
       for (final itemId in _selectedItemIds) {
         await vaultService.deleteItem(itemId);
       }
-      
+
       setState(() {
         _selectedItemIds.clear();
         _isSelectionMode = false;
       });
     }
   }
-  
+
   void _showAddMenu() {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLarge)),
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLarge)),
       ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-              ListTile(
-                leading: const Icon(Icons.camera_alt, color: AppTheme.accent),
-                title: const Text('Take Photo'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _capturePhoto();
-                },
-              ),
-              ListTile(
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: AppTheme.accent),
+              title: const Text('Take Photo'),
+              onTap: () {
+                Navigator.pop(context);
+                _capturePhoto();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.photo_library, color: AppTheme.accent),
               title: const Text('Import Photos'),
-                onTap: () {
-                  Navigator.pop(context);
+              onTap: () {
+                Navigator.pop(context);
                 _importPhotos();
               },
             ),
-              ListTile(
+            ListTile(
               leading: const Icon(Icons.videocam, color: AppTheme.accent),
               title: const Text('Record Video'),
-                onTap: () {
-                  Navigator.pop(context);
+              onTap: () {
+                Navigator.pop(context);
                 _recordVideo();
-                },
-              ),
-              ListTile(
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.video_library, color: AppTheme.accent),
               title: const Text('Import Videos'),
-                onTap: () {
-                  Navigator.pop(context);
+              onTap: () {
+                Navigator.pop(context);
                 _importVideos();
-                },
-              ),
-              ListTile(
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.folder, color: AppTheme.accent),
               title: const Text('Import Files'),
-                onTap: () {
-                  Navigator.pop(context);
+              onTap: () {
+                Navigator.pop(context);
                 _importFiles();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.auto_fix_high, color: AppTheme.accent),
-                title: const Text('Remove duplicates'),
-                subtitle: const Text('Detect and delete duplicate files'),
-                onTap: () async {
-                  Navigator.pop(context);
-                  final vaultService = Provider.of<VaultService>(context, listen: false);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high, color: AppTheme.accent),
+              title: const Text('Remove duplicates'),
+              subtitle: const Text('Detect and delete duplicate files'),
+              onTap: () async {
+                Navigator.pop(context);
+                final vaultService =
+                    Provider.of<VaultService>(context, listen: false);
+                if (!mounted) return;
+                setState(() {
+                  _isImporting = true;
+                  _importProgress = 0;
+                  _importTotal = 0;
+                  _importStatus = 'Scanning for duplicates...';
+                });
+                final removed = await vaultService.removeDuplicates(
+                    onProgress: (current, total, status) {
                   if (!mounted) return;
                   setState(() {
                     _isImporting = true;
                     _importProgress = 0;
                     _importTotal = 0;
-                    _importStatus = 'Scanning for duplicates...';
+                    _importStatus = status;
                   });
-                  final removed = await vaultService.removeDuplicates(onProgress: (current, total, status) {
-                    if (!mounted) return;
-                    setState(() {
-                      _isImporting = true;
-                      _importProgress = 0;
-                      _importTotal = 0;
-                      _importStatus = status;
-                    });
-                  });
-                  if (!mounted) return;
-                  setState(() {
-                    _isImporting = false;
-                    _importProgress = 0;
-                    _importTotal = 0;
-                    _importStatus = null;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Removed $removed duplicate(s)'),
-                      backgroundColor: AppTheme.accent,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                },
-              ),
-            ],
+                });
+                if (!mounted) return;
+                setState(() {
+                  _isImporting = false;
+                  _importProgress = 0;
+                  _importTotal = 0;
+                  _importStatus = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Removed $removed duplicate(s)'),
+                    backgroundColor: AppTheme.accent,
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              },
+            ),
+          ],
         ),
       ),
     );
   }
-  
+
   Future<void> _capturePhoto() async {
     try {
       debugPrint('[VaultHomePage] === Starting camera photo capture ===');
-      
+
       // Check current permission status first
       final currentStatus = await Permission.camera.status;
-      debugPrint('[VaultHomePage] Camera permission current status: $currentStatus');
-      
+      debugPrint(
+          '[VaultHomePage] Camera permission current status: $currentStatus');
+
       // Check if permission is permanently denied
-      final isPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.camera);
-      debugPrint('[VaultHomePage] Camera permission permanently denied: $isPermanentlyDenied');
-      
+      final isPermanentlyDenied =
+          await _permissionService.isPermanentlyDenied(Permission.camera);
+      debugPrint(
+          '[VaultHomePage] Camera permission permanently denied: $isPermanentlyDenied');
+
       if (isPermanentlyDenied) {
         if (mounted) {
           final shouldOpen = await _showPermissionDialog(
             title: 'Camera Access Needed',
-            message: 'To capture photos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.',
+            message:
+                'To capture photos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.',
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
         }
         return;
       }
-      
+
       // Request camera permission
       debugPrint('[VaultHomePage] Requesting camera permission...');
       final granted = await _permissionService.requestCameraPermission();
       debugPrint('[VaultHomePage] Camera permission granted: $granted');
-      
+
       // Check final status to determine if it's permanently denied or just denied
       final finalStatus = await Permission.camera.status;
-      debugPrint('[VaultHomePage] Camera permission final status: $finalStatus');
-      debugPrint('[VaultHomePage] Camera permission final - granted: ${finalStatus.isGranted}, denied: ${finalStatus.isDenied}, permanentlyDenied: ${finalStatus.isPermanentlyDenied}');
-      
+      debugPrint(
+          '[VaultHomePage] Camera permission final status: $finalStatus');
+      debugPrint(
+          '[VaultHomePage] Camera permission final - granted: ${finalStatus.isGranted}, denied: ${finalStatus.isDenied}, permanentlyDenied: ${finalStatus.isPermanentlyDenied}');
+
       if (!granted && !finalStatus.isGranted) {
         // Check if it's actually permanently denied (trust final status)
         final isNowPermanentlyDenied = finalStatus.isPermanentlyDenied;
-        debugPrint('[VaultHomePage] Camera permission now permanently denied: $isNowPermanentlyDenied');
-        
+        debugPrint(
+            '[VaultHomePage] Camera permission now permanently denied: $isNowPermanentlyDenied');
+
         if (isNowPermanentlyDenied && mounted) {
           final shouldOpen = await _showPermissionDialog(
             title: 'Camera Access Needed',
-            message: 'To capture photos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.',
+            message:
+                'To capture photos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.',
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
-    } else {
+        } else {
           // Permission is just denied (not permanently), let image_picker try to request it
           // image_picker has its own permission handling that might work better
-          debugPrint('[VaultHomePage] Camera permission denied but not permanently - letting image_picker handle permission request...');
+          debugPrint(
+              '[VaultHomePage] Camera permission denied but not permanently - letting image_picker handle permission request...');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Camera permission is required. Please grant permission when prompted.'),
+                content: Text(
+                    'Camera permission is required. Please grant permission when prompted.'),
                 backgroundColor: AppTheme.warning,
                 duration: Duration(seconds: 2),
               ),
@@ -4915,59 +5106,66 @@ class _VaultHomePageState extends State<VaultHomePage> {
           }
         }
       }
-      
+
       // Try to proceed with camera - image_picker will handle permission request if needed
-      debugPrint('[VaultHomePage] Proceeding with image picker (will handle permissions if needed)...');
-      
+      debugPrint(
+          '[VaultHomePage] Proceeding with image picker (will handle permissions if needed)...');
+
       try {
         final image = await _imagePicker.pickImage(
           source: ImageSource.camera,
           imageQuality: 100,
         );
-        
+
         if (image != null && mounted) {
-          debugPrint('[VaultHomePage] Image captured successfully: ${image.path}');
+          debugPrint(
+              '[VaultHomePage] Image captured successfully: ${image.path}');
           // Show importing status for camera captures
-                  setState(() {
+          setState(() {
             _isImporting = true;
             _importStatus = 'Saving photo...';
             _importProgress = 0;
             _importTotal = 1;
           });
-          
+
           await _importFileToVault(
             File(image.path),
             VaultItemSource.camera,
           );
-          
-                setState(() {
+
+          setState(() {
             _isImporting = false;
             _importProgress = 0;
             _importTotal = 0;
             _importStatus = null;
           });
         } else {
-          debugPrint('[VaultHomePage] No image captured - image_picker returned null');
+          debugPrint(
+              '[VaultHomePage] No image captured - image_picker returned null');
           // Check permission status again after image_picker attempt
           final postPickerStatus = await Permission.camera.status;
-          debugPrint('[VaultHomePage] Camera permission after image_picker: $postPickerStatus');
-          debugPrint('[VaultHomePage] Camera permission - granted: ${postPickerStatus.isGranted}, denied: ${postPickerStatus.isDenied}, permanentlyDenied: ${postPickerStatus.isPermanentlyDenied}');
-          
+          debugPrint(
+              '[VaultHomePage] Camera permission after image_picker: $postPickerStatus');
+          debugPrint(
+              '[VaultHomePage] Camera permission - granted: ${postPickerStatus.isGranted}, denied: ${postPickerStatus.isDenied}, permanentlyDenied: ${postPickerStatus.isPermanentlyDenied}');
+
           if (!postPickerStatus.isGranted && mounted) {
             // Permission still not granted - might need to show a message
             if (postPickerStatus.isPermanentlyDenied) {
               final shouldOpen = await _showPermissionDialog(
                 title: 'Camera Access Needed',
-                message: 'To capture photos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.',
+                message:
+                    'To capture photos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.',
               );
-              
+
               if (shouldOpen == true) {
                 await _permissionService.openSettings();
               }
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Camera permission was not granted. Please try again and allow camera access when prompted.'),
+                  content: Text(
+                      'Camera permission was not granted. Please try again and allow camera access when prompted.'),
                   backgroundColor: AppTheme.warning,
                   duration: Duration(seconds: 3),
                 ),
@@ -4978,16 +5176,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
       } catch (e, stackTrace) {
         debugPrint('[VaultHomePage] Error from image_picker: $e');
         debugPrint('[VaultHomePage] Stack trace: $stackTrace');
-        
+
         // Check permission status after error
         final errorStatus = await Permission.camera.status;
-        debugPrint('[VaultHomePage] Camera permission after error: $errorStatus');
-        
+        debugPrint(
+            '[VaultHomePage] Camera permission after error: $errorStatus');
+
         if (mounted) {
           final errorMessage = e.toString().toLowerCase();
-          
+
           // Check if error is about camera not being available (common on simulator)
-          if (errorMessage.contains('camera not available') || 
+          if (errorMessage.contains('camera not available') ||
               errorMessage.contains('camera unavailable') ||
               errorMessage.contains('no camera')) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -5023,80 +5222,86 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   Future<void> _recordVideo() async {
     try {
       debugPrint('[VaultHomePage] === Starting video recording ===');
-      
+
       // Check current permission status
       final cameraStatus = await Permission.camera.status;
       debugPrint('[VaultHomePage] Camera permission status: $cameraStatus');
-      
+
       // Check if permission is permanently denied
-      final cameraPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.camera);
-      debugPrint('[VaultHomePage] Camera permanently denied: $cameraPermanentlyDenied');
-      
+      final cameraPermanentlyDenied =
+          await _permissionService.isPermanentlyDenied(Permission.camera);
+      debugPrint(
+          '[VaultHomePage] Camera permanently denied: $cameraPermanentlyDenied');
+
       if (cameraPermanentlyDenied) {
         if (mounted) {
-          final message = 'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
-          
+          final message =
+              'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
+
           final shouldOpen = await _showPermissionDialog(
             title: 'Permissions Needed',
             message: message,
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
         }
         return;
       }
-      
+
       // Request permission
       debugPrint('[VaultHomePage] Requesting camera permission...');
       final cameraGranted = await _permissionService.requestCameraPermission();
       debugPrint('[VaultHomePage] Camera permission granted: $cameraGranted');
-      
+
       // Check final status after request
       final finalCameraStatus = await Permission.camera.status;
       debugPrint('[VaultHomePage] Final camera status: $finalCameraStatus');
-      
+
       // Check if permission became permanently denied after request
-      final cameraNowPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.camera);
-      
+      final cameraNowPermanentlyDenied =
+          await _permissionService.isPermanentlyDenied(Permission.camera);
+
       if (cameraNowPermanentlyDenied) {
         if (mounted) {
-          final message = 'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
-          
+          final message =
+              'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
+
           final shouldOpen = await _showPermissionDialog(
             title: 'Permissions Needed',
             message: message,
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
         }
         return;
       }
-      
+
       // Check if permission is granted (use final status as well)
       final finalCameraGranted = cameraGranted || finalCameraStatus.isGranted;
-      
+
       // Check if permission is permanently denied (trust final status)
       final cameraIsPermanentlyDenied = finalCameraStatus.isPermanentlyDenied;
-      
+
       if (!finalCameraGranted) {
         if (cameraIsPermanentlyDenied) {
           // Show settings dialog if permanently denied
           if (mounted) {
-            final message = 'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
-            
+            final message =
+                'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
+
             final shouldOpen = await _showPermissionDialog(
               title: 'Permissions Needed',
               message: message,
             );
-            
+
             if (shouldOpen == true) {
               await _permissionService.openSettings();
             }
@@ -5104,11 +5309,13 @@ class _VaultHomePageState extends State<VaultHomePage> {
           return;
         } else {
           // Permission is just denied (not permanently), let image_picker try
-          debugPrint('[VaultHomePage] Permission denied but not permanently - letting image_picker handle permission request...');
+          debugPrint(
+              '[VaultHomePage] Permission denied but not permanently - letting image_picker handle permission request...');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Camera permission is required. Please grant permission when prompted.'),
+                content: Text(
+                    'Camera permission is required. Please grant permission when prompted.'),
                 backgroundColor: AppTheme.warning,
                 duration: Duration(seconds: 2),
               ),
@@ -5116,30 +5323,32 @@ class _VaultHomePageState extends State<VaultHomePage> {
           }
         }
       }
-      
+
       // Try to proceed with video recording - image_picker will handle permission request if needed
-      debugPrint('[VaultHomePage] Proceeding with video picker (will handle permissions if needed)...');
-      
+      debugPrint(
+          '[VaultHomePage] Proceeding with video picker (will handle permissions if needed)...');
+
       try {
         final video = await _imagePicker.pickVideo(
           source: ImageSource.camera,
         );
-        
+
         if (video != null && mounted) {
-          debugPrint('[VaultHomePage] Video recorded successfully: ${video.path}');
+          debugPrint(
+              '[VaultHomePage] Video recorded successfully: ${video.path}');
           // Show importing status for camera recordings
-              setState(() {
+          setState(() {
             _isImporting = true;
             _importStatus = 'Saving video...';
             _importProgress = 0;
             _importTotal = 1;
           });
-          
+
           await _importFileToVault(
             File(video.path),
             VaultItemSource.camera,
           );
-          
+
           setState(() {
             _isImporting = false;
             _importProgress = 0;
@@ -5147,27 +5356,31 @@ class _VaultHomePageState extends State<VaultHomePage> {
             _importStatus = null;
           });
         } else {
-          debugPrint('[VaultHomePage] No video recorded - image_picker returned null');
+          debugPrint(
+              '[VaultHomePage] No video recorded - image_picker returned null');
           // Check permission status again after image_picker attempt
           final postPickerCameraStatus = await Permission.camera.status;
-          debugPrint('[VaultHomePage] Camera permission after image_picker: $postPickerCameraStatus');
-          
+          debugPrint(
+              '[VaultHomePage] Camera permission after image_picker: $postPickerCameraStatus');
+
           if (!postPickerCameraStatus.isGranted && mounted) {
             if (postPickerCameraStatus.isPermanentlyDenied) {
-              final message = 'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
-              
+              final message =
+                  'To record videos, Nyx needs access to your camera.\n\nPlease enable camera access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Camera"\n\nThen return to the app to continue.';
+
               final shouldOpen = await _showPermissionDialog(
                 title: 'Permissions Needed',
                 message: message,
               );
-              
+
               if (shouldOpen == true) {
                 await _permissionService.openSettings();
               }
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Camera permission was not granted. Please try again and allow camera access when prompted.'),
+                  content: Text(
+                      'Camera permission was not granted. Please try again and allow camera access when prompted.'),
                   backgroundColor: AppTheme.warning,
                   duration: Duration(seconds: 3),
                 ),
@@ -5178,11 +5391,12 @@ class _VaultHomePageState extends State<VaultHomePage> {
       } catch (e, stackTrace) {
         debugPrint('[VaultHomePage] Error from image_picker: $e');
         debugPrint('[VaultHomePage] Stack trace: $stackTrace');
-        
+
         // Check permission status after error
         final errorCameraStatus = await Permission.camera.status;
-        debugPrint('[VaultHomePage] Camera permission after error: $errorCameraStatus');
-        
+        debugPrint(
+            '[VaultHomePage] Camera permission after error: $errorCameraStatus');
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -5205,46 +5419,52 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   Future<void> _importPhotos() async {
     try {
       debugPrint('[VaultHomePage] === Starting photo import ===');
       bool queuedImports = false;
-      
+
       // Check if permission is permanently denied
-      final isPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.photos);
-      debugPrint('[VaultHomePage] Photo library permission permanently denied: $isPermanentlyDenied');
-      
+      final isPermanentlyDenied =
+          await _permissionService.isPermanentlyDenied(Permission.photos);
+      debugPrint(
+          '[VaultHomePage] Photo library permission permanently denied: $isPermanentlyDenied');
+
       if (isPermanentlyDenied) {
         if (mounted) {
           final shouldOpen = await _showPermissionDialog(
             title: 'Photo Library Access Needed',
-            message: 'To import photos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
+            message:
+                'To import photos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
         }
         return;
       }
-      
+
       // Request photo library permission
       debugPrint('[VaultHomePage] Requesting photo library permission...');
       final granted = await _permissionService.requestPhotoLibraryPermission();
       debugPrint('[VaultHomePage] Photo library permission granted: $granted');
-      
+
       if (!granted) {
         // Check if it became permanently denied after request
-        final isNowPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.photos);
-        debugPrint('[VaultHomePage] Photo library permission now permanently denied: $isNowPermanentlyDenied');
-        
+        final isNowPermanentlyDenied =
+            await _permissionService.isPermanentlyDenied(Permission.photos);
+        debugPrint(
+            '[VaultHomePage] Photo library permission now permanently denied: $isNowPermanentlyDenied');
+
         if (isNowPermanentlyDenied && mounted) {
           final shouldOpen = await _showPermissionDialog(
             title: 'Photo Library Access Needed',
-            message: 'To import photos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
+            message:
+                'To import photos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
@@ -5258,7 +5478,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         }
         return;
       }
-      
+
       setState(() {
         _isImporting = true;
         _importProgress = 0;
@@ -5275,25 +5495,27 @@ class _VaultHomePageState extends State<VaultHomePage> {
         allowMultiple: true,
         type: FileType.image,
       );
-      
+
       // Yield after file picker closes
       await Future.delayed(const Duration(milliseconds: 50));
 
       if (result != null && result.files.isNotEmpty) {
         final photoFiles = result.files.where((f) => f.path != null).toList();
-        
+
         // Initialize background import service
         _initBackgroundImportService();
-        
+
         // Check subscription limits before queuing
         final vaultService = Provider.of<VaultService>(context, listen: false);
-        final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-        final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
-        
+        final subscriptionService =
+            Provider.of<SubscriptionService>(context, listen: false);
+        final hasPremium = subscriptionService.currentTier.isUnlimited ||
+            subscriptionService.isInTrial;
+
         if (!hasPremium) {
           final currentItemCount = vaultService.items.length;
           final maxItems = subscriptionService.currentTier.maxItems;
-          
+
           if (currentItemCount + photoFiles.length > maxItems) {
             if (mounted) {
               _showPaywall();
@@ -5301,7 +5523,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
             return;
           }
         }
-        
+
         // Create import tasks
         final importTasks = photoFiles.map((platformFile) {
           return ImportTask(
@@ -5310,25 +5532,27 @@ class _VaultHomePageState extends State<VaultHomePage> {
             mimeType: 'image/${platformFile.extension ?? 'jpg'}',
             source: VaultItemSource.import,
             deleteOriginal: false,
-            folderId: _currentFolderId, // Store in current folder if inside a folder
+            folderId:
+                _currentFolderId, // Store in current folder if inside a folder
           );
         }).toList();
-        
+
         // Queue imports for background processing
         await _backgroundImportService!.queueImports(importTasks);
         queuedImports = true;
-        
+
         // Update UI to show import started
         if (mounted) {
           setState(() {
             _isImporting = true;
             _importTotal = photoFiles.length;
             _importProgress = 0;
-            _importStatus = 'Queued ${photoFiles.length} photo(s) for import...';
+            _importStatus =
+                'Queued ${photoFiles.length} photo(s) for import...';
           });
         }
       }
-      
+
       // IMPORTANT: Don't clear importing state after queuing.
       // The background import progress stream drives the progress UI until completion.
       if (!queuedImports && mounted) {
@@ -5361,34 +5585,38 @@ class _VaultHomePageState extends State<VaultHomePage> {
   Future<void> _importVideos() async {
     try {
       // Check if permission is permanently denied
-      final isPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.photos);
-      
+      final isPermanentlyDenied =
+          await _permissionService.isPermanentlyDenied(Permission.photos);
+
       if (isPermanentlyDenied) {
         if (mounted) {
           final shouldOpen = await _showPermissionDialog(
             title: 'Photo Library Access Needed',
-            message: 'To import videos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
+            message:
+                'To import videos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
         }
         return;
       }
-      
+
       // Request photo library permission
       final granted = await _permissionService.requestPhotoLibraryPermission();
-      
+
       if (!granted) {
         // Check if it became permanently denied after request
-        final isNowPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.photos);
+        final isNowPermanentlyDenied =
+            await _permissionService.isPermanentlyDenied(Permission.photos);
         if (isNowPermanentlyDenied && mounted) {
           final shouldOpen = await _showPermissionDialog(
             title: 'Photo Library Access Needed',
-            message: 'To import videos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
+            message:
+                'To import videos, Nyx needs access to your photo library.\n\nPlease enable photo library access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Tap "Photos"\n4. Select "All Photos" or "Selected Photos"\n\nThen return to the app to continue.',
           );
-          
+
           if (shouldOpen == true) {
             await _permissionService.openSettings();
           }
@@ -5400,9 +5628,9 @@ class _VaultHomePageState extends State<VaultHomePage> {
             ),
           );
         }
-      return;
-    }
-    
+        return;
+      }
+
       // iOS: use Photos-native picker to avoid FilePicker hangs.
       if (Platform.isIOS) {
         if (mounted) {
@@ -5433,20 +5661,20 @@ class _VaultHomePageState extends State<VaultHomePage> {
       var pickerTimedOut = false;
       final result = await FilePicker.platform
           .pickFiles(
-            allowMultiple: true,
-            type: FileType.video,
-            // On iOS, this uses the native picker which is optimized
-            // The delay was likely from FilePicker loading metadata, but we can't control that
-            // However, removing our artificial delays helps
-          )
+        allowMultiple: true,
+        type: FileType.video,
+        // On iOS, this uses the native picker which is optimized
+        // The delay was likely from FilePicker loading metadata, but we can't control that
+        // However, removing our artificial delays helps
+      )
           .timeout(
-            const Duration(seconds: 60),
-            onTimeout: () {
-              pickerTimedOut = true;
-              return null;
-            },
-          );
-      
+        const Duration(seconds: 60),
+        onTimeout: () {
+          pickerTimedOut = true;
+          return null;
+        },
+      );
+
       if (result != null && result.files.isNotEmpty) {
         final pickedFiles = result.files;
         final directPathFiles = <PlatformFile>[];
@@ -5483,7 +5711,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           }
           return;
         }
-        
+
         // Immediately show UI feedback that a multi-select happened.
         // Also yield a frame so the banner renders before any further work.
         setState(() {
@@ -5500,19 +5728,21 @@ class _VaultHomePageState extends State<VaultHomePage> {
             _importStatus = 'Queuing $totalImportable video(s) for import...';
           });
         }
-        
+
         // Initialize background import service
         _initBackgroundImportService();
-        
+
         // Check subscription limits
         final vaultService = Provider.of<VaultService>(context, listen: false);
-        final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-        final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
-        
+        final subscriptionService =
+            Provider.of<SubscriptionService>(context, listen: false);
+        final hasPremium = subscriptionService.currentTier.isUnlimited ||
+            subscriptionService.isInTrial;
+
         if (!hasPremium) {
           final currentItemCount = vaultService.items.length;
           final maxItems = subscriptionService.currentTier.maxItems;
-          
+
           if (currentItemCount + totalImportable > maxItems) {
             if (mounted) {
               setState(() {
@@ -5524,7 +5754,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
             return;
           }
         }
-        
+
         // Create import tasks (direct paths + temp paths for stream-only items).
         final importTasks = <ImportTask>[
           for (final platformFile in directPathFiles)
@@ -5537,10 +5767,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
               folderId: _currentFolderId,
             ),
         ];
-        
+
         // Queue imports for background processing
         await _backgroundImportService!.queueImports(importTasks);
-        
+
         // Update UI to show import started
         if (mounted) {
           setState(() {
@@ -5573,7 +5803,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     } catch (e) {
       debugPrint('[VaultHomePage] Error importing videos: $e');
-    if (mounted) {
+      if (mounted) {
         setState(() {
           _isImporting = false;
           _importProgress = 0;
@@ -5593,27 +5823,30 @@ class _VaultHomePageState extends State<VaultHomePage> {
   Future<void> _importFiles() async {
     try {
       debugPrint('[VaultHomePage] === Starting file import ===');
-      
+
       setState(() {
         _isImporting = true;
         _importProgress = 0;
         _importTotal = 0;
         _importStatus = 'Selecting files...';
       });
-      
+
       // On iOS, FilePicker handles permissions automatically
       // On Android, request storage permission if needed
       if (Platform.isAndroid) {
-        debugPrint('[VaultHomePage] Android platform - checking storage permission...');
-        final isPermanentlyDenied = await _permissionService.isPermanentlyDenied(Permission.storage);
-        
+        debugPrint(
+            '[VaultHomePage] Android platform - checking storage permission...');
+        final isPermanentlyDenied =
+            await _permissionService.isPermanentlyDenied(Permission.storage);
+
         if (isPermanentlyDenied) {
           if (mounted) {
             final shouldOpen = await _showPermissionDialog(
               title: 'Storage Access Needed',
-              message: 'To import files, Nyx needs access to your storage.\n\nPlease enable storage access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Storage"\n\nThen return to the app to continue.',
+              message:
+                  'To import files, Nyx needs access to your storage.\n\nPlease enable storage access in Settings:\n\n1. Open Settings\n2. Tap "Nyx"\n3. Turn on "Storage"\n\nThen return to the app to continue.',
             );
-            
+
             if (shouldOpen == true) {
               await _permissionService.openSettings();
             }
@@ -5621,14 +5854,15 @@ class _VaultHomePageState extends State<VaultHomePage> {
           setState(() {
             _isImporting = false;
           });
-      return;
-    }
-    
+          return;
+        }
+
         // Request storage permission
         debugPrint('[VaultHomePage] Requesting storage permission...');
-        final granted = await _permissionService.requestPhotoLibraryAddPermission();
+        final granted =
+            await _permissionService.requestPhotoLibraryAddPermission();
         debugPrint('[VaultHomePage] Storage permission granted: $granted');
-        
+
         if (!granted) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -5644,35 +5878,38 @@ class _VaultHomePageState extends State<VaultHomePage> {
           return;
         }
       } else {
-        debugPrint('[VaultHomePage] iOS platform - FilePicker handles permissions automatically');
+        debugPrint(
+            '[VaultHomePage] iOS platform - FilePicker handles permissions automatically');
       }
-      
+
       // Yield to UI thread before opening file picker
       await Future.delayed(const Duration(milliseconds: 100));
-      
+
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
         type: FileType.any, // Support all file types
       );
-      
+
       // Yield after file picker closes
       await Future.delayed(const Duration(milliseconds: 50));
-      
+
       if (result != null && result.files.isNotEmpty) {
         final files = result.files.where((f) => f.path != null).toList();
-        
+
         // Initialize background import service
         _initBackgroundImportService();
-        
+
         // Check subscription limits
         final vaultService = Provider.of<VaultService>(context, listen: false);
-        final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-        final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
-        
+        final subscriptionService =
+            Provider.of<SubscriptionService>(context, listen: false);
+        final hasPremium = subscriptionService.currentTier.isUnlimited ||
+            subscriptionService.isInTrial;
+
         if (!hasPremium) {
           final currentItemCount = vaultService.items.length;
           final maxItems = subscriptionService.currentTier.maxItems;
-          
+
           if (currentItemCount + files.length > maxItems) {
             if (mounted) {
               _showPaywall();
@@ -5680,24 +5917,25 @@ class _VaultHomePageState extends State<VaultHomePage> {
             return;
           }
         }
-        
+
         // Create import tasks
         final importTasks = files.map((platformFile) {
           return ImportTask(
             filePath: platformFile.path!,
             filename: platformFile.path!.split('/').last,
-            mimeType: platformFile.extension != null 
+            mimeType: platformFile.extension != null
                 ? _getMimeTypeFromExtension(platformFile.extension!)
                 : null,
             source: VaultItemSource.import,
             deleteOriginal: false,
-            folderId: _currentFolderId, // Store in current folder if inside a folder
+            folderId:
+                _currentFolderId, // Store in current folder if inside a folder
           );
         }).toList();
-        
+
         // Queue imports for background processing
         await _backgroundImportService!.queueImports(importTasks);
-        
+
         // Update UI to show import started
         if (mounted) {
           setState(() {
@@ -5723,25 +5961,27 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   Future<void> _importFileToVault(
-    File file, 
+    File file,
     VaultItemSource source, {
     String? mimeType,
   }) async {
     if (!await file.exists()) {
       throw Exception('File does not exist');
     }
-    
+
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    
+    final subscriptionService =
+        Provider.of<SubscriptionService>(context, listen: false);
+
     // Check free tier limit
-    final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
+    final hasPremium = subscriptionService.currentTier.isUnlimited ||
+        subscriptionService.isInTrial;
     if (!hasPremium) {
       final currentItemCount = vaultService.items.length;
       final maxItems = subscriptionService.currentTier.maxItems;
-      
+
       if (currentItemCount >= maxItems) {
         // Show paywall when limit reached
         if (mounted) {
@@ -5750,7 +5990,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         return;
       }
     }
-    
+
     final filename = file.path.split('/').last;
     // CRITICAL: Never read whole files into RAM (videos can crash iOS).
     // Use path-based streaming copy.
@@ -5772,7 +6012,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
         debugPrint('[VaultHomePage] Error generating video thumbnail: $e');
       }
     }
-    
+
     // Delete the original file after importing (for camera captures)
     if (source == VaultItemSource.camera) {
       try {
@@ -5782,7 +6022,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
       }
     }
   }
-  
+
   String? _getMimeTypeFromExtension(String extension) {
     final ext = extension.toLowerCase();
     final mimeTypes = {
@@ -5800,15 +6040,17 @@ class _VaultHomePageState extends State<VaultHomePage> {
       'aac': 'audio/aac',
       'pdf': 'application/pdf',
       'doc': 'application/msword',
-      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'docx':
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'zip': 'application/zip',
       'rar': 'application/x-rar-compressed',
     };
     return mimeTypes[ext];
   }
-  
+
   /// Show permission dialog helper
-  Future<bool?> _showPermissionDialog({required String title, required String message}) async {
+  Future<bool?> _showPermissionDialog(
+      {required String title, required String message}) async {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

@@ -9,10 +9,10 @@ import '../models/vault_metadata.dart';
 class MultiVaultService extends ChangeNotifier {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final Uuid _uuid = const Uuid();
-  
+
   List<VaultMetadata> _vaults = [];
   bool _isInitialized = false;
-  
+
   List<VaultMetadata> get vaults => List.unmodifiable(_vaults);
   VaultMetadata? get primaryVault {
     if (_vaults.isEmpty) return null;
@@ -23,23 +23,28 @@ class MultiVaultService extends ChangeNotifier {
       return null;
     }
   }
+
   bool get isInitialized => _isInitialized;
   int get vaultCount => _vaults.length;
   int get maxVaults => 10; // Limit for unlimited tier
-  
+
   MultiVaultService() {
     _initialize();
   }
-  
+
   Future<void> _initialize() async {
     try {
       final vaultsJson = await _secureStorage.read(key: 'vaults_metadata');
       if (vaultsJson != null && vaultsJson.isNotEmpty) {
         final List<dynamic> jsonList = jsonDecode(vaultsJson) as List<dynamic>;
-        _vaults = jsonList.map((json) => VaultMetadata.fromJson(json as Map<String, dynamic>)).toList();
-        debugPrint('[MultiVaultService] Loaded ${_vaults.length} vaults from storage');
+        _vaults = jsonList
+            .map((json) => VaultMetadata.fromJson(json as Map<String, dynamic>))
+            .toList();
+        debugPrint(
+            '[MultiVaultService] Loaded ${_vaults.length} vaults from storage');
         for (var vault in _vaults) {
-          debugPrint('[MultiVaultService] Loaded vault: ${vault.name} (ID: ${vault.id.substring(0, 8)}..., isPrimary: ${vault.isPrimary}, trigger: ${vault.triggerCode})');
+          debugPrint(
+              '[MultiVaultService] Loaded vault: ${vault.name} (ID: ${vault.id.substring(0, 8)}..., isPrimary: ${vault.isPrimary})');
         }
       } else {
         _vaults = [];
@@ -52,7 +57,8 @@ class MultiVaultService extends ChangeNotifier {
       final hasPrimaryCredentials = (pinSalt != null) || (patternSalt != null);
       final hasPrimary = _vaults.any((v) => v.isPrimary);
       if (hasPrimaryCredentials && !hasPrimary) {
-        final triggerCode = await _secureStorage.read(key: 'unlock_trigger_code') ?? 'primary';
+        final triggerCode =
+            await _secureStorage.read(key: 'unlock_trigger_code') ?? 'primary';
         final primaryVault = VaultMetadata(
           id: _uuid.v4(),
           name: 'Primary Vault',
@@ -62,9 +68,9 @@ class MultiVaultService extends ChangeNotifier {
         );
         _vaults.insert(0, primaryVault);
         await _saveVaults();
-        debugPrint('[MultiVaultService] Migration: created primary vault (trigger: $triggerCode)');
+        debugPrint('[MultiVaultService] Migration: created primary vault');
       }
-      
+
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
@@ -73,13 +79,13 @@ class MultiVaultService extends ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   /// Initialize primary vault (called during first PIN setup)
   Future<void> initializePrimaryVault(String triggerCode) async {
     if (_vaults.isNotEmpty) {
       throw StateError('Primary vault already exists');
     }
-    
+
     final primaryVault = VaultMetadata(
       id: _uuid.v4(),
       name: 'Primary Vault',
@@ -87,14 +93,16 @@ class MultiVaultService extends ChangeNotifier {
       createdAt: DateTime.now(),
       isPrimary: true,
     );
-    
-    debugPrint('[MultiVaultService] Initializing primary vault: ${primaryVault.name} (ID: ${primaryVault.id.substring(0, 8)}..., trigger: ${primaryVault.triggerCode})');
+
+    debugPrint(
+        '[MultiVaultService] Initializing primary vault: ${primaryVault.name} (ID: ${primaryVault.id.substring(0, 8)}...)');
     _vaults.add(primaryVault);
     await _saveVaults();
-    debugPrint('[MultiVaultService] Primary vault saved. Total vaults: ${_vaults.length}');
+    debugPrint(
+        '[MultiVaultService] Primary vault saved. Total vaults: ${_vaults.length}');
     notifyListeners();
   }
-  
+
   /// Create a new secondary vault with PIN or pattern
   Future<VaultMetadata> createSecondaryVault({
     required String name,
@@ -126,15 +134,29 @@ class MultiVaultService extends ChangeNotifier {
     final storage = secureStorage ?? _secureStorage;
 
     if (usePattern) {
-      await storage.write(key: 'pattern_hash_$vaultId', value: patternHash!);
-      await storage.write(key: 'pattern_salt_$vaultId', value: patternSalt!);
-      debugPrint('[MultiVaultService] Stored secondary vault pattern for vaultId: $vaultId');
+      final resolvedPatternHash = patternHash;
+      final resolvedPatternSalt = patternSalt;
+      if (resolvedPatternHash == null || resolvedPatternSalt == null) {
+        throw StateError('Pattern credentials are required');
+      }
+      await storage.write(
+          key: 'pattern_hash_$vaultId', value: resolvedPatternHash);
+      await storage.write(
+          key: 'pattern_salt_$vaultId', value: resolvedPatternSalt);
+      debugPrint(
+          '[MultiVaultService] Stored secondary vault pattern for vaultId: $vaultId');
     } else {
-      await storage.write(key: 'pin_hash_$vaultId', value: pinHash!);
-      await storage.write(key: 'pin_salt_$vaultId', value: pinSalt!);
-      debugPrint('[MultiVaultService] Stored secondary vault PIN for vaultId: $vaultId');
+      final resolvedPinHash = pinHash;
+      final resolvedPinSalt = pinSalt;
+      if (resolvedPinHash == null || resolvedPinSalt == null) {
+        throw StateError('PIN credentials are required');
+      }
+      await storage.write(key: 'pin_hash_$vaultId', value: resolvedPinHash);
+      await storage.write(key: 'pin_salt_$vaultId', value: resolvedPinSalt);
+      debugPrint(
+          '[MultiVaultService] Stored secondary vault PIN for vaultId: $vaultId');
     }
-    
+
     final vault = VaultMetadata(
       id: vaultId,
       name: name,
@@ -142,21 +164,24 @@ class MultiVaultService extends ChangeNotifier {
       createdAt: DateTime.now(),
       isPrimary: false,
     );
-    
-    debugPrint('[MultiVaultService] Creating secondary vault: ${vault.name} (ID: ${vault.id}, Trigger: ${vault.triggerCode})');
-    debugPrint('[MultiVaultService] Total vaults before add: ${_vaults.length}');
-    
+
+    debugPrint(
+        '[MultiVaultService] Creating secondary vault: ${vault.name} (ID: ${vault.id})');
+    debugPrint(
+        '[MultiVaultService] Total vaults before add: ${_vaults.length}');
+
     _vaults.add(vault);
     await _saveVaults();
     notifyListeners();
-    
+
     debugPrint('[MultiVaultService] Total vaults after add: ${_vaults.length}');
-    
+
     return vault;
   }
-  
+
   /// Update PIN for an existing secondary vault (e.g. after reset).
-  Future<void> updateSecondaryVaultPIN(String vaultId, String pinHash, String pinSalt) async {
+  Future<void> updateSecondaryVaultPIN(
+      String vaultId, String pinHash, String pinSalt) async {
     final vault = getVaultById(vaultId);
     if (vault == null || vault.isPrimary) {
       throw StateError('Vault not found or cannot update primary vault PIN');
@@ -165,20 +190,26 @@ class MultiVaultService extends ChangeNotifier {
     await _secureStorage.delete(key: 'pattern_salt_$vaultId');
     await _secureStorage.write(key: 'pin_hash_$vaultId', value: pinHash);
     await _secureStorage.write(key: 'pin_salt_$vaultId', value: pinSalt);
-    debugPrint('[MultiVaultService] Updated secondary vault PIN for vaultId: $vaultId');
+    debugPrint(
+        '[MultiVaultService] Updated secondary vault PIN for vaultId: $vaultId');
   }
 
   /// Update pattern for an existing secondary vault (e.g. after reset).
-  Future<void> updateSecondaryVaultPattern(String vaultId, String patternHash, String patternSalt) async {
+  Future<void> updateSecondaryVaultPattern(
+      String vaultId, String patternHash, String patternSalt) async {
     final vault = getVaultById(vaultId);
     if (vault == null || vault.isPrimary) {
-      throw StateError('Vault not found or cannot update primary vault pattern');
+      throw StateError(
+          'Vault not found or cannot update primary vault pattern');
     }
     await _secureStorage.delete(key: 'pin_hash_$vaultId');
     await _secureStorage.delete(key: 'pin_salt_$vaultId');
-    await _secureStorage.write(key: 'pattern_hash_$vaultId', value: patternHash);
-    await _secureStorage.write(key: 'pattern_salt_$vaultId', value: patternSalt);
-    debugPrint('[MultiVaultService] Updated secondary vault pattern for vaultId: $vaultId');
+    await _secureStorage.write(
+        key: 'pattern_hash_$vaultId', value: patternHash);
+    await _secureStorage.write(
+        key: 'pattern_salt_$vaultId', value: patternSalt);
+    debugPrint(
+        '[MultiVaultService] Updated secondary vault pattern for vaultId: $vaultId');
   }
 
   /// Get vault by trigger code
@@ -189,7 +220,7 @@ class MultiVaultService extends ChangeNotifier {
       return null;
     }
   }
-  
+
   /// Get vault by ID
   VaultMetadata? getVaultById(String id) {
     try {
@@ -203,62 +234,64 @@ class MultiVaultService extends ChangeNotifier {
   Future<bool> vaultUsesPattern(String vaultId) async {
     return await _secureStorage.read(key: 'pattern_salt_$vaultId') != null;
   }
-  
+
   /// Update vault metadata (for recovery codes, etc.)
   Future<void> updateVault(VaultMetadata vault) async {
     final index = _vaults.indexWhere((v) => v.id == vault.id);
     if (index == -1) {
       throw StateError('Vault not found');
     }
-    
+
     _vaults[index] = vault;
     await _saveVaults();
     notifyListeners();
   }
-  
+
   /// Delete a secondary vault (cannot delete primary)
   /// Also removes PIN hash/salt from secure storage
-  Future<void> deleteVault(String id, {FlutterSecureStorage? secureStorage}) async {
+  Future<void> deleteVault(String id,
+      {FlutterSecureStorage? secureStorage}) async {
     final vault = getVaultById(id);
     if (vault == null) {
       throw StateError('Vault not found');
     }
-    
+
     if (vault.isPrimary) {
       throw StateError('Cannot delete primary vault');
     }
-    
+
     final storage = secureStorage ?? _secureStorage;
     await storage.delete(key: 'pin_hash_$id');
     await storage.delete(key: 'pin_salt_$id');
     await storage.delete(key: 'pattern_hash_$id');
     await storage.delete(key: 'pattern_salt_$id');
-    
+
     _vaults.removeWhere((v) => v.id == id);
     await _saveVaults();
     notifyListeners();
   }
-  
+
   /// Save vaults metadata to secure storage
   Future<void> _saveVaults() async {
     final jsonList = _vaults.map((v) => v.toJson()).toList();
     final jsonString = jsonEncode(jsonList);
     await _secureStorage.write(key: 'vaults_metadata', value: jsonString);
   }
-  
+
   /// Get recovery information for a vault (PIN hash/salt from secure storage)
   /// This should only be accessible from the primary vault
-  Future<Map<String, String?>> getRecoveryInfo(String vaultId, {FlutterSecureStorage? secureStorage}) async {
+  Future<Map<String, String?>> getRecoveryInfo(String vaultId,
+      {FlutterSecureStorage? secureStorage}) async {
     final vault = getVaultById(vaultId);
     if (vault == null) {
       throw StateError('Vault not found');
     }
-    
+
     // Read PIN hash and salt from secure storage
     final storage = secureStorage ?? _secureStorage;
     final pinHash = await storage.read(key: 'pin_hash_$vaultId');
     final pinSalt = await storage.read(key: 'pin_salt_$vaultId');
-    
+
     return {
       'triggerCode': vault.triggerCode,
       'pinHash': pinHash,

@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_state.dart';
@@ -9,28 +8,28 @@ import 'encryption_service.dart';
 class AuthService extends ChangeNotifier {
   final EncryptionService _encryptionService;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
-  
+
   AppState _appState = AppState.locked;
   bool _isInitializing = true;
   Uint8List? _masterKey;
   String? _currentVaultId; // ID of currently unlocked vault (null = primary)
-  
+
   AppState get appState => _appState;
   bool get isInitializing => _isInitializing;
   bool get isLocked => _appState == AppState.locked;
   bool get isUnlocked => _appState == AppState.unlocked;
   bool get isDisguised => _appState == AppState.disguised;
-  
+
   AuthService(this._encryptionService) {
     _initialize();
   }
-  
+
   Future<void> _initialize() async {
     // iOS Keychain persists after app deletion, but SharedPreferences don't
     // Use SharedPreferences to detect fresh install and clear Keychain if needed
     final prefs = await SharedPreferences.getInstance();
     final hasLaunchedBefore = prefs.getBool('has_launched_before') ?? false;
-    
+
     if (!hasLaunchedBefore) {
       // Fresh install detected - clear all secure storage keys
       // This ensures onboarding/PIN setup runs even if Keychain has old data
@@ -44,18 +43,20 @@ class AuthService extends ChangeNotifier {
         await _secureStorage.delete(key: 'unlock_trigger_code');
         await _secureStorage.delete(key: 'unlock_method');
         await _secureStorage.delete(key: 'was_unlocked');
+        await _secureStorage.delete(key: 'vaults_metadata');
         debugPrint('Fresh install detected - cleared secure storage');
       } catch (e) {
         debugPrint('Error clearing secure storage on fresh install: $e');
       }
-      
+
       // Mark that app has launched
       await prefs.setBool('has_launched_before', true);
     }
-    
+
     // Check if onboarding is complete
-    final onboardingComplete = await _secureStorage.read(key: 'onboarding_complete');
-    
+    final onboardingComplete =
+        await _secureStorage.read(key: 'onboarding_complete');
+
     if (onboardingComplete != 'true') {
       // First launch - show onboarding
       _appState = AppState.onboarding;
@@ -67,64 +68,64 @@ class AuthService extends ChangeNotifier {
       final patternHash = await _secureStorage.read(key: 'pattern_hash');
       final hasPIN = pinSalt != null && pinHash != null;
       final hasPattern = patternSalt != null && patternHash != null;
-      
+
       if (!hasPIN && !hasPattern) {
-        debugPrint('[AuthService] No unlock method set up - redirecting to setup');
+        debugPrint(
+            '[AuthService] No unlock method set up - redirecting to setup');
         _appState = AppState.pinSetup;
       } else {
         _appState = AppState.locked;
       }
     }
-    
+
     _isInitializing = false;
     notifyListeners();
   }
-  
+
   /// Complete onboarding and proceed to unlock method setup (if not already set up)
   Future<void> completeOnboarding() async {
     await _secureStorage.write(key: 'onboarding_complete', value: 'true');
-    
+
     final pinSalt = await _secureStorage.read(key: 'pin_salt');
     final pinHash = await _secureStorage.read(key: 'pin_hash');
     final patternSalt = await _secureStorage.read(key: 'pattern_salt');
     final patternHash = await _secureStorage.read(key: 'pattern_hash');
     final hasPIN = pinSalt != null && pinHash != null;
     final hasPattern = patternSalt != null && patternHash != null;
-    
+
     if (!hasPIN && !hasPattern) {
       _appState = AppState.pinSetup;
     } else {
       _appState = AppState.locked;
     }
-    
+
     notifyListeners();
   }
-  
+
   /// Verify PIN and unlock vault
   Future<AuthResult> verifyPIN(String pin) async {
     final saltHex = await _secureStorage.read(key: 'pin_salt');
     final hashedPIN = await _secureStorage.read(key: 'pin_hash');
-    
+
     if (saltHex == null || hashedPIN == null) {
       // Vault not set up - treat as setup
       return AuthResult.notInitialized;
     }
-    
+
     // Check PIN
     final salt = _hexToBytes(saltHex);
     final masterKey = await _encryptionService.deriveMasterKey(pin, salt);
-    
+
     if (await _encryptionService.verifyPassword(pin, hashedPIN)) {
       // Real vault (primary)
       _masterKey = masterKey;
-      _currentVaultId = null; // null = primary vault
-      await _unlockVault();
+      await _unlockVault(vaultId: null);
       return AuthResult.unlocked;
     }
-    
+
     return AuthResult.failed;
   }
-  
+
   /// Verify PIN for a secondary vault
   /// Uses the same logic as verifyPIN - reads from secure storage directly
   Future<bool> verifySecondaryVaultPIN(String vaultId, String pin) async {
@@ -132,30 +133,32 @@ class AuthService extends ChangeNotifier {
     final saltKey = 'pin_salt_$vaultId';
     final saltHex = await _secureStorage.read(key: saltKey);
     final hashedPIN = await _secureStorage.read(key: hashKey);
-    
+
     if (saltHex == null || hashedPIN == null) {
-      debugPrint('[AuthService] Secondary vault PIN not found for vaultId: $vaultId (keys: $hashKey, $saltKey; saltHex null: ${saltHex == null}, hashedPIN null: ${hashedPIN == null})');
+      debugPrint(
+          '[AuthService] Secondary vault PIN not found for vaultId: $vaultId');
       return false;
     }
-    
+
     // Check PIN (same logic as primary vault: verifyPassword uses salt embedded in hashedPIN)
     final salt = _hexToBytes(saltHex);
     final masterKey = await _encryptionService.deriveMasterKey(pin, salt);
-    
+
     final verified = await _encryptionService.verifyPassword(pin, hashedPIN);
     if (verified) {
       _masterKey = masterKey;
-      _currentVaultId = vaultId;
-      await _unlockVault();
+      await _unlockVault(vaultId: vaultId);
       debugPrint('[AuthService] Secondary vault unlocked: $vaultId');
       return true;
     }
-    debugPrint('[AuthService] Secondary vault PIN verification failed for vaultId: $vaultId');
+    debugPrint(
+        '[AuthService] Secondary vault PIN verification failed for vaultId: $vaultId');
     return false;
   }
 
   /// Verify pattern for a secondary vault
-  Future<bool> verifySecondaryVaultPattern(String vaultId, String patternString) async {
+  Future<bool> verifySecondaryVaultPattern(
+      String vaultId, String patternString) async {
     final hashKey = 'pattern_hash_$vaultId';
     final saltKey = 'pattern_salt_$vaultId';
     final saltHex = await _secureStorage.read(key: saltKey);
@@ -166,20 +169,21 @@ class AuthService extends ChangeNotifier {
     }
 
     final salt = _hexToBytes(saltHex);
-    final masterKey = await _encryptionService.deriveMasterKey(patternString, salt);
+    final masterKey =
+        await _encryptionService.deriveMasterKey(patternString, salt);
 
     if (await _encryptionService.verifyPassword(patternString, hashedPattern)) {
       _masterKey = masterKey;
-      _currentVaultId = vaultId;
-      await _unlockVault();
-      debugPrint('[AuthService] Secondary vault unlocked with pattern: $vaultId');
+      await _unlockVault(vaultId: vaultId);
+      debugPrint(
+          '[AuthService] Secondary vault unlocked with pattern: $vaultId');
       return true;
     }
     return false;
   }
 
   String? get currentVaultId => _currentVaultId;
-  
+
   /// Set up PIN (initial setup or PIN change). Clears pattern if previously set.
   Future<bool> setupPIN(String pin, {String? unlockTriggerCode}) async {
     try {
@@ -187,23 +191,24 @@ class AuthService extends ChangeNotifier {
         debugPrint('[AuthService] PIN cannot start with 0');
         return false;
       }
-      
+
       debugPrint('[AuthService] Setting up PIN...');
-      
+
       final salt = _encryptionService.generateSalt();
       final hashedPIN = await _encryptionService.hashPassword(pin, salt);
-      
+
       await _secureStorage.write(key: 'pin_salt', value: _bytesToHex(salt));
       await _secureStorage.write(key: 'pin_hash', value: hashedPIN);
       await _secureStorage.write(key: 'vault_initialized', value: 'true');
       await _secureStorage.write(key: 'unlock_method', value: 'pin');
-      
+
       await _secureStorage.delete(key: 'pattern_salt');
       await _secureStorage.delete(key: 'pattern_hash');
-      
+
       final triggerCode = unlockTriggerCode ?? pin;
-      await _secureStorage.write(key: 'unlock_trigger_code', value: triggerCode);
-      
+      await _secureStorage.write(
+          key: 'unlock_trigger_code', value: triggerCode);
+
       debugPrint('[AuthService] PIN setup completed successfully');
       _appState = AppState.locked;
       _masterKey = null;
@@ -215,7 +220,7 @@ class AuthService extends ChangeNotifier {
       return false;
     }
   }
-  
+
   /// Set up pattern unlock. Clears PIN if previously set.
   Future<bool> setupPattern(String patternString) async {
     try {
@@ -224,21 +229,22 @@ class AuthService extends ChangeNotifier {
         debugPrint('[AuthService] Pattern too short (min 4 dots)');
         return false;
       }
-      
+
       debugPrint('[AuthService] Setting up pattern...');
-      
+
       final salt = _encryptionService.generateSalt();
-      final hashedPattern = await _encryptionService.hashPassword(patternString, salt);
-      
+      final hashedPattern =
+          await _encryptionService.hashPassword(patternString, salt);
+
       await _secureStorage.write(key: 'pattern_salt', value: _bytesToHex(salt));
       await _secureStorage.write(key: 'pattern_hash', value: hashedPattern);
       await _secureStorage.write(key: 'vault_initialized', value: 'true');
       await _secureStorage.write(key: 'unlock_method', value: 'pattern');
-      
+
       await _secureStorage.delete(key: 'pin_salt');
       await _secureStorage.delete(key: 'pin_hash');
       await _secureStorage.write(key: 'unlock_trigger_code', value: 'pattern');
-      
+
       debugPrint('[AuthService] Pattern setup completed successfully');
       _appState = AppState.locked;
       _masterKey = null;
@@ -250,42 +256,42 @@ class AuthService extends ChangeNotifier {
       return false;
     }
   }
-  
+
   /// Verify pattern and unlock primary vault.
   Future<AuthResult> verifyPattern(String patternString) async {
     final saltHex = await _secureStorage.read(key: 'pattern_salt');
     final hashedPattern = await _secureStorage.read(key: 'pattern_hash');
-    
+
     if (saltHex == null || hashedPattern == null) {
       return AuthResult.notInitialized;
     }
-    
+
     final salt = _hexToBytes(saltHex);
-    final masterKey = await _encryptionService.deriveMasterKey(patternString, salt);
-    
+    final masterKey =
+        await _encryptionService.deriveMasterKey(patternString, salt);
+
     if (await _encryptionService.verifyPassword(patternString, hashedPattern)) {
       _masterKey = masterKey;
-      _currentVaultId = null;
-      await _unlockVault();
+      await _unlockVault(vaultId: null);
       return AuthResult.unlocked;
     }
-    
+
     return AuthResult.failed;
   }
-  
+
   /// Get the current unlock method from storage ('pin' or 'pattern').
   Future<String?> getUnlockMethod() async {
     return await _secureStorage.read(key: 'unlock_method');
   }
-  
+
   /// Unlock vault (internal)
-  Future<void> _unlockVault() async {
-    _currentVaultId = null; // null = primary vault
+  Future<void> _unlockVault({required String? vaultId}) async {
+    _currentVaultId = vaultId;
     _appState = AppState.unlocked;
     await _secureStorage.write(key: 'was_unlocked', value: 'true');
     notifyListeners();
   }
-  
+
   /// Lock vault and return to unlock screen
   Future<void> lockVault() async {
     _masterKey = null;
@@ -299,14 +305,14 @@ class AuthService extends ChangeNotifier {
       debugPrint('[AuthService] lockVault: secure storage write failed: $e');
     }
   }
-  
+
   /// Switch to home state
   void switchToDisguised() {
     _masterKey = null;
-    _appState = AppState.locked;
+    _appState = AppState.disguised;
     notifyListeners();
   }
-  
+
   /// Request unlock (show unlock screen or method setup if first time)
   Future<void> requestUnlock() async {
     final pinSalt = await _secureStorage.read(key: 'pin_salt');
@@ -315,7 +321,7 @@ class AuthService extends ChangeNotifier {
     final patternHash = await _secureStorage.read(key: 'pattern_hash');
     final hasPIN = pinSalt != null && pinHash != null;
     final hasPattern = patternSalt != null && patternHash != null;
-    
+
     if (!hasPIN && !hasPattern) {
       _appState = AppState.pinSetup;
     } else {
@@ -323,15 +329,15 @@ class AuthService extends ChangeNotifier {
     }
     notifyListeners();
   }
-  
+
   /// Get current master key (for encryption operations)
   Uint8List? get masterKey => _masterKey;
-  
+
   /// Legacy: unlock trigger code (no longer used in UI)
   Future<String?> getUnlockTriggerCode() async {
     return await _secureStorage.read(key: 'unlock_trigger_code');
   }
-  
+
   /// Legacy: set unlock trigger code (no longer used in UI)
   Future<bool> setUnlockTriggerCode(String code) async {
     try {
@@ -349,12 +355,11 @@ class AuthService extends ChangeNotifier {
       return false;
     }
   }
-  
-  
+
   String _bytesToHex(Uint8List bytes) {
     return bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   }
-  
+
   Uint8List _hexToBytes(String hex) {
     final result = Uint8List(hex.length ~/ 2);
     for (int i = 0; i < hex.length; i += 2) {
@@ -362,7 +367,7 @@ class AuthService extends ChangeNotifier {
     }
     return result;
   }
-  
+
   /// Reset app to first-launch state (for testing/debugging only)
   /// WARNING: This will delete all app data including PIN, vault, etc.
   Future<void> resetAppForTesting() async {
@@ -377,12 +382,12 @@ class AuthService extends ChangeNotifier {
       await _secureStorage.delete(key: 'unlock_trigger_code');
       await _secureStorage.delete(key: 'unlock_method');
       await _secureStorage.delete(key: 'was_unlocked');
-      
+
       // Reset state
       _masterKey = null;
       _appState = AppState.onboarding; // Start from onboarding
       _isInitializing = false;
-      
+
       notifyListeners();
       debugPrint('App reset to first-launch state');
     } catch (e) {

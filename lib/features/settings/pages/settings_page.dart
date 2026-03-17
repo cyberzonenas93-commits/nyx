@@ -1,5 +1,5 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
@@ -13,7 +13,6 @@ import '../../../core/services/redirect_blocker_service.dart';
 import '../../../features/subscription/pages/paywall_page.dart';
 import '../../../features/vault/pages/vault_home_page.dart';
 import '../../../shared/widgets/pin_verification_dialog.dart';
-import '../../../shared/widgets/secure_button.dart';
 import 'security_page.dart';
 import 'privacy_policy_page.dart';
 import '../../onboarding/pages/onboarding_page.dart';
@@ -33,8 +32,10 @@ class _SettingsPageState extends State<SettingsPage> {
   static const _tapsRequired = 7;
 
   void _onAppBarTitleTap() {
+    if (!kDebugMode) return;
     final now = DateTime.now();
-    if (_titleLastTapAt != null && now.difference(_titleLastTapAt!) > _tapWindow) {
+    if (_titleLastTapAt != null &&
+        now.difference(_titleLastTapAt!) > _tapWindow) {
       _titleTapCount = 0;
     }
     _titleTapCount++;
@@ -47,6 +48,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _showGodModePinVerification() async {
+    if (!kDebugMode) return;
     if (!mounted) return;
     final verifiedPIN = await PinVerificationDialog.show(context);
     if (verifiedPIN == null || verifiedPIN.isEmpty || !mounted) return;
@@ -56,14 +58,16 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
 
     if (result == AuthResult.unlocked) {
-      final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+      final subscriptionService =
+          Provider.of<SubscriptionService>(context, listen: false);
       await subscriptionService.toggleGodMode();
       if (!mounted) return;
       final isOn = subscriptionService.isGodMode;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isOn ? 'God mode on – full access' : 'God mode off'),
-          backgroundColor: isOn ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
+          backgroundColor:
+              isOn ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -83,8 +87,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final subscriptionService = Provider.of<SubscriptionService>(context);
-
     return Scaffold(
       backgroundColor: AppTheme.primary,
       appBar: AppBar(
@@ -104,14 +106,14 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           // Subscription Section
           _SubscriptionSection(),
-          
+
           const SizedBox(height: 24),
-          
+
           // Browser Section
           _BrowserSettingsSection(),
-          
+
           const SizedBox(height: 24),
-          
+
           // Account Section
           _buildSection(
             title: 'Account',
@@ -130,9 +132,9 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Help Section
           _buildSection(
             title: 'Help',
@@ -144,7 +146,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (context) => const OnboardingPage(isTutorialMode: true),
+                      builder: (context) =>
+                          const OnboardingPage(isTutorialMode: true),
                     ),
                   );
                 },
@@ -154,7 +157,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: 'Vault Tutorial',
                 subtitle: 'Interactive vault guide',
                 onTap: () {
-                  final tutorialService = Provider.of<TutorialService>(context, listen: false);
+                  final tutorialService =
+                      Provider.of<TutorialService>(context, listen: false);
                   tutorialService.resetTutorial();
                   Navigator.of(context).pushReplacement(
                     MaterialPageRoute(
@@ -165,10 +169,10 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
-          // About Section (App Version: tap 7 times to toggle God mode)
+
+          // About Section
           _buildSection(
             title: 'About',
             children: [
@@ -187,12 +191,11 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          
         ],
       ),
     );
   }
-  
+
   Widget _buildSection({
     required String title,
     required List<Widget> children,
@@ -223,7 +226,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// Hidden: tap 7 times to toggle God mode (full access without subscription).
 class _SecretVersionTile extends StatefulWidget {
   @override
   State<_SecretVersionTile> createState() => _SecretVersionTileState();
@@ -236,6 +238,7 @@ class _SecretVersionTileState extends State<_SecretVersionTile> {
   static const _tapsRequired = 7;
 
   Future<void> _onTap() async {
+    if (!kDebugMode) return;
     final now = DateTime.now();
     if (_lastTapAt != null && now.difference(_lastTapAt!) > _tapWindow) {
       _tapCount = 0;
@@ -255,14 +258,16 @@ class _SecretVersionTileState extends State<_SecretVersionTile> {
     if (!mounted) return;
 
     if (result == AuthResult.unlocked) {
-      final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+      final subscriptionService =
+          Provider.of<SubscriptionService>(context, listen: false);
       await subscriptionService.toggleGodMode();
       if (!mounted) return;
       final isOn = subscriptionService.isGodMode;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isOn ? 'God mode on – full access' : 'God mode off'),
-          backgroundColor: isOn ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
+          backgroundColor:
+              isOn ? AppTheme.accent : AppTheme.text.withOpacity(0.8),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -285,8 +290,8 @@ class _SecretVersionTileState extends State<_SecretVersionTile> {
     return _SettingsTile(
       icon: Icons.info_outline,
       title: 'App Version',
-      subtitle: '1.0.0',
-      onTap: _onTap,
+      subtitle: '1.0.3',
+      onTap: kDebugMode ? _onTap : null,
     );
   }
 }
@@ -297,7 +302,7 @@ class _SubscriptionSection extends StatelessWidget {
     final subscriptionService = Provider.of<SubscriptionService>(context);
     final currentTier = subscriptionService.currentTier;
     final status = subscriptionService.status;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -351,7 +356,8 @@ class _SubscriptionSection extends StatelessWidget {
                                   if (subscriptionService.isGodMode) ...[
                                     const SizedBox(width: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: AppTheme.accent.withOpacity(0.2),
                                         borderRadius: BorderRadius.circular(6),
@@ -378,7 +384,8 @@ class _SubscriptionSection extends StatelessWidget {
                                   color: AppTheme.text.withOpacity(0.7),
                                 ),
                               ),
-                              if (currentTier.isUnlimited && status == SubscriptionStatus.active)
+                              if (currentTier.isUnlimited &&
+                                  status == SubscriptionStatus.active)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 4),
                                   child: Text(
@@ -390,13 +397,16 @@ class _SubscriptionSection extends StatelessWidget {
                                     ),
                                   ),
                                 ),
-                              if (status == SubscriptionStatus.trial && subscriptionService.isInTrial) ...[
+                              if (status == SubscriptionStatus.trial &&
+                                  subscriptionService.isInTrial) ...[
                                 const SizedBox(height: 8),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
                                   decoration: BoxDecoration(
                                     color: AppTheme.accent.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                                    borderRadius: BorderRadius.circular(
+                                        AppTheme.radiusSmall),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -424,14 +434,15 @@ class _SubscriptionSection extends StatelessWidget {
                         ),
                       ],
                     ),
-                    
-                    if (status == SubscriptionStatus.trial && subscriptionService.isInTrial) ...[
+                    if (status == SubscriptionStatus.trial &&
+                        subscriptionService.isInTrial) ...[
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: AppTheme.accent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusSmall),
                           border: Border.all(
                             color: AppTheme.accent.withOpacity(0.3),
                           ),
@@ -476,14 +487,16 @@ class _SubscriptionSection extends StatelessWidget {
                                 onPressed: () {
                                   Navigator.of(context).push(
                                     MaterialPageRoute(
-                                      builder: (context) => const PaywallPage(showCloseButton: true),
+                                      builder: (context) => const PaywallPage(
+                                          showCloseButton: true),
                                     ),
                                   );
                                 },
                                 style: TextButton.styleFrom(
                                   backgroundColor: AppTheme.accent,
                                   foregroundColor: AppTheme.primary,
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 8),
                                 ),
                                 child: const Text(
                                   'Subscribe Now',
@@ -503,7 +516,8 @@ class _SubscriptionSection extends StatelessWidget {
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: AppTheme.warning.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusSmall),
                           border: Border.all(
                             color: AppTheme.warning.withOpacity(0.3),
                           ),
@@ -532,11 +546,12 @@ class _SubscriptionSection extends StatelessWidget {
                   ],
                 ),
               ),
-              
+
               const Divider(height: 1),
-              
+
               // Manage subscription actions
-              if (currentTier.isUnlimited && status == SubscriptionStatus.active) ...[
+              if (currentTier.isUnlimited &&
+                  status == SubscriptionStatus.active) ...[
                 _SettingsTile(
                   icon: Icons.card_membership,
                   title: 'Manage Subscription',
@@ -544,12 +559,14 @@ class _SubscriptionSection extends StatelessWidget {
                   onTap: () async {
                     // Open system subscription management
                     final url = Uri.parse(
-                      // iOS App Store subscription management
-                      'https://apps.apple.com/account/subscriptions',
+                      Platform.isAndroid
+                          ? 'https://play.google.com/store/account/subscriptions'
+                          : 'https://apps.apple.com/account/subscriptions',
                     );
-                    
+
                     if (await canLaunchUrl(url)) {
-                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                      await launchUrl(url,
+                          mode: LaunchMode.externalApplication);
                     } else {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -571,16 +588,9 @@ class _SubscriptionSection extends StatelessWidget {
                   title: 'Restore Purchases',
                   subtitle: 'Restore subscription on this device',
                   onTap: () async {
-                    await subscriptionService.restorePurchases();
+                    final result = await subscriptionService.restorePurchases();
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Purchases restored'),
-                          backgroundColor: AppTheme.accent,
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
+                      _showRestorePurchasesMessage(context, result);
                     }
                   },
                 ),
@@ -592,7 +602,8 @@ class _SubscriptionSection extends StatelessWidget {
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (context) => const PaywallPage(showCloseButton: true),
+                        builder: (context) =>
+                            const PaywallPage(showCloseButton: true),
                       ),
                     );
                   },
@@ -602,16 +613,9 @@ class _SubscriptionSection extends StatelessWidget {
                   title: 'Restore Purchases',
                   subtitle: 'Restore subscription on this device',
                   onTap: () async {
-                    await subscriptionService.restorePurchases();
+                    final result = await subscriptionService.restorePurchases();
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Purchases restored'),
-                          backgroundColor: AppTheme.accent,
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
+                      _showRestorePurchasesMessage(context, result);
                     }
                   },
                 ),
@@ -622,13 +626,65 @@ class _SubscriptionSection extends StatelessWidget {
       ],
     );
   }
+
+  void _showRestorePurchasesMessage(
+    BuildContext context,
+    RestorePurchasesResult result,
+  ) {
+    late final SnackBar snackBar;
+    switch (result) {
+      case RestorePurchasesResult.restored:
+        snackBar = const SnackBar(
+          content: Text('Active subscription restored.'),
+          backgroundColor: AppTheme.accent,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        );
+        break;
+      case RestorePurchasesResult.noActivePurchases:
+        snackBar = const SnackBar(
+          content: Text('No active subscription was found for this account.'),
+          backgroundColor: AppTheme.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        );
+        break;
+      case RestorePurchasesResult.alreadyInProgress:
+        snackBar = const SnackBar(
+          content: Text('A restore is already in progress.'),
+          backgroundColor: AppTheme.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        );
+        break;
+      case RestorePurchasesResult.unavailable:
+        snackBar = const SnackBar(
+          content: Text('Restoring purchases is unavailable on this device.'),
+          backgroundColor: AppTheme.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        );
+        break;
+      case RestorePurchasesResult.failed:
+        snackBar = const SnackBar(
+          content: Text('Restore failed. Please try again.'),
+          backgroundColor: AppTheme.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        );
+        break;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(snackBar);
+  }
 }
 
 class _BrowserSettingsSection extends StatefulWidget {
   const _BrowserSettingsSection();
 
   @override
-  State<_BrowserSettingsSection> createState() => _BrowserSettingsSectionState();
+  State<_BrowserSettingsSection> createState() =>
+      _BrowserSettingsSectionState();
 }
 
 class _BrowserSettingsSectionState extends State<_BrowserSettingsSection> {
@@ -659,18 +715,16 @@ class _BrowserSettingsSectionState extends State<_BrowserSettingsSection> {
     } else {
       await redirectBlocker.disable();
     }
-    
+
     if (mounted) {
       setState(() {
         _isRedirectBlockerEnabled = value;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            value
-                ? 'Redirect blocker enabled'
-                : 'Redirect blocker disabled',
+            value ? 'Redirect blocker enabled' : 'Redirect blocker disabled',
           ),
           backgroundColor: AppTheme.accent,
           behavior: SnackBarBehavior.floating,
@@ -753,14 +807,14 @@ class _SettingsTile extends StatelessWidget {
   final String title;
   final String? subtitle;
   final VoidCallback? onTap;
-  
+
   const _SettingsTile({
     required this.icon,
     required this.title,
     this.subtitle,
     this.onTap,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -794,7 +848,7 @@ class _SettingsTile extends StatelessWidget {
 
 class _StorageSettingsTile extends StatefulWidget {
   const _StorageSettingsTile();
-  
+
   @override
   State<_StorageSettingsTile> createState() => _StorageSettingsTileState();
 }
@@ -802,13 +856,13 @@ class _StorageSettingsTile extends StatefulWidget {
 class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   bool? _useICloudStorage;
   bool _isLoading = true;
-  
+
   @override
   void initState() {
     super.initState();
     _loadStoragePreference();
   }
-  
+
   Future<void> _loadStoragePreference() async {
     try {
       final vaultService = Provider.of<VaultService>(context, listen: false);
@@ -829,7 +883,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       }
     }
   }
-  
+
   String _getStorageSubtitle() {
     if (Platform.isAndroid) {
       return 'Local storage (Android)';
@@ -842,22 +896,22 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       return 'Local storage';
     }
   }
-  
+
   bool _isStorageSelectionAvailable() {
     // Storage selection only available on iOS/macOS
     return Platform.isIOS || Platform.isMacOS;
   }
-  
+
   Future<void> _showStorageDialog() async {
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    
+
     final result = await showDialog<String>(
       context: context,
       builder: (context) => _StorageSelectionDialog(
         currentPreference: _useICloudStorage,
       ),
     );
-    
+
     if (result != null && mounted) {
       bool? newPreference;
       if (result == 'icloud') {
@@ -867,13 +921,13 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       } else {
         newPreference = null; // auto-detect
       }
-      
+
       await vaultService.setStoragePreference(newPreference);
-      
+
       setState(() {
         _useICloudStorage = newPreference;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -887,7 +941,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     // Add timeout to prevent infinite loading
@@ -901,7 +955,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
           });
         }
       });
-      
+
       return const ListTile(
         leading: CircularProgressIndicator(
           color: AppTheme.accent,
@@ -910,7 +964,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
         title: Text('Loading storage settings...'),
       );
     }
-    
+
     return _SettingsTile(
       icon: Icons.storage,
       title: 'Vault Storage',
@@ -922,11 +976,11 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
 
 class _StorageSelectionDialog extends StatelessWidget {
   final bool? currentPreference;
-  
+
   const _StorageSelectionDialog({
     required this.currentPreference,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -949,7 +1003,8 @@ class _StorageSelectionDialog extends StatelessWidget {
           children: [
             _StorageOption(
               title: 'iCloud Drive',
-              description: 'Slower read and write speeds, but provides a way to recover your data if your device is lost or damaged. Your encrypted vault will sync across your Apple devices.',
+              description:
+                  'Slower read and write speeds, but provides a way to recover your data if your device is lost or damaged. Your encrypted vault will sync across your Apple devices.',
               icon: Icons.cloud,
               isSelected: currentPreference == true,
               onTap: () => Navigator.of(context).pop('icloud'),
@@ -957,7 +1012,8 @@ class _StorageSelectionDialog extends StatelessWidget {
             const SizedBox(height: 16),
             _StorageOption(
               title: 'Local Storage',
-              description: 'Faster read and write speeds for optimal performance. However, if your device is lost or damaged, your data cannot be recovered.',
+              description:
+                  'Faster read and write speeds for optimal performance. However, if your device is lost or damaged, your data cannot be recovered.',
               icon: Icons.phone_iphone,
               isSelected: currentPreference == false,
               onTap: () => Navigator.of(context).pop('local'),
@@ -965,7 +1021,8 @@ class _StorageSelectionDialog extends StatelessWidget {
             const SizedBox(height: 16),
             _StorageOption(
               title: 'Auto-Detect',
-              description: 'Automatically use iCloud if available, otherwise use local storage. This is the default setting.',
+              description:
+                  'Automatically use iCloud if available, otherwise use local storage. This is the default setting.',
               icon: Icons.auto_awesome,
               isSelected: currentPreference == null,
               onTap: () => Navigator.of(context).pop('auto'),
@@ -1022,7 +1079,7 @@ class _StorageOption extends StatelessWidget {
   final IconData icon;
   final bool isSelected;
   final VoidCallback onTap;
-  
+
   const _StorageOption({
     required this.title,
     required this.description,
@@ -1030,7 +1087,7 @@ class _StorageOption extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -1055,7 +1112,8 @@ class _StorageOption extends StatelessWidget {
           children: [
             Icon(
               icon,
-              color: isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.6),
+              color:
+                  isSelected ? AppTheme.accent : AppTheme.text.withOpacity(0.6),
               size: 24,
             ),
             const SizedBox(width: 12),

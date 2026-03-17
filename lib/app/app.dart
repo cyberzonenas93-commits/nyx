@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:ui' show ViewFocusEvent, ViewFocusState;
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'theme.dart';
 import '../core/services/permission_service.dart';
 import '../core/services/auth_service.dart';
 import '../core/services/panic_switch_service.dart';
-import '../core/services/wifi_transfer_service.dart';
 import '../features/onboarding/pages/onboarding_page.dart';
 import '../features/unlock/pages/unlock_page.dart';
 import '../features/unlock/pages/unlock_method_selection_page.dart';
@@ -20,11 +20,14 @@ class MediaPrivacyVaultApp extends StatefulWidget {
   State<MediaPrivacyVaultApp> createState() => _MediaPrivacyVaultAppState();
 }
 
-class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with WidgetsBindingObserver {
+class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
+    with WidgetsBindingObserver {
   bool _panicSwitchInitialized = false;
+  bool _isAppVisible = true;
+  bool _isLifecycleLockInProgress = false;
   AuthService? _authService; // Cache reference for lifecycle callbacks
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  
+
   @override
   void initState() {
     super.initState();
@@ -39,21 +42,22 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
       }
     });
   }
-  
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
-  
+
   Future<void> _initPanicSwitch() async {
     if (_panicSwitchInitialized || !mounted) return; // Only initialize once
-    
+
     try {
       // Access provider - context is available in post-frame callback
       if (!mounted) return;
-      
-      final panicSwitchService = Provider.of<PanicSwitchService>(context, listen: false);
+
+      final panicSwitchService =
+          Provider.of<PanicSwitchService>(context, listen: false);
       final isEnabled = await panicSwitchService.isEnabled();
       if (isEnabled) {
         await panicSwitchService.startMonitoring();
@@ -63,122 +67,155 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
       debugPrint('[App] Error initializing panic switch: $e');
     }
   }
-  
+
   Future<void> _stopPanicSwitch() async {
     if (!mounted) return;
-    
+
     try {
-      final panicSwitchService = Provider.of<PanicSwitchService>(context, listen: false);
+      final panicSwitchService =
+          Provider.of<PanicSwitchService>(context, listen: false);
       await panicSwitchService.stopMonitoring();
-      _panicSwitchInitialized = false; // Allow re-initialization when app resumes
+      _panicSwitchInitialized =
+          false; // Allow re-initialization when app resumes
     } catch (e) {
       debugPrint('[App] Error stopping panic switch: $e');
     }
   }
-  
+
   /// Check camera permission on app launch (don't request automatically)
   /// Permission will be requested when user actually tries to use camera feature
   Future<void> _requestPermissionsOnLaunch() async {
     try {
       // Wait a bit for the app to fully initialize
       await Future.delayed(const Duration(milliseconds: 2000));
-      
+
       final permissionService = PermissionService();
-      
+
       // Just check and log permission status, don't request automatically
       // iOS/Android guidelines recommend requesting permissions when the feature is used
       final cameraGranted = await permissionService.isCameraGranted();
-      final cameraPermanentlyDenied = await permissionService.isPermanentlyDenied(Permission.camera);
+      final cameraPermanentlyDenied =
+          await permissionService.isPermanentlyDenied(Permission.camera);
       final cameraStatus = await Permission.camera.status;
-      debugPrint('[App] Camera permission status on launch: status=$cameraStatus, granted=$cameraGranted, permanentlyDenied=$cameraPermanentlyDenied');
-      
-      debugPrint('[App] Permission check completed. Permissions will be requested when features are used.');
+      debugPrint(
+          '[App] Camera permission status on launch: status=$cameraStatus, granted=$cameraGranted, permanentlyDenied=$cameraPermanentlyDenied');
+
+      debugPrint(
+          '[App] Permission check completed. Permissions will be requested when features are used.');
     } catch (e) {
       debugPrint('[App] Error checking permissions on launch: $e');
     }
   }
-  
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
-    // Lock vault when app goes to background (minimized or multitasking)
+
+    if (state == AppLifecycleState.resumed) {
+      _setAppVisibility(true);
+      _initPanicSwitch();
+      _resumeBackgroundImports();
+      return;
+    }
+
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
-      _lockVaultIfUnlocked();
-      _stopPanicSwitch(); // Stop monitoring to save resources when app is in background
-      // Note: Background imports will continue automatically via persistent Future
-    }
-    
-    // Re-initialize panic switch when app resumes (in case it was stopped)
-    if (state == AppLifecycleState.resumed) {
-      _initPanicSwitch();
-      // Resume any paused background imports
-      _resumeBackgroundImports();
+      _handleAppBackgrounding('lifecycle:$state');
     }
   }
-  
+
+  @override
+  void didChangeViewFocus(ViewFocusEvent event) {
+    super.didChangeViewFocus(event);
+
+    if (event.state == ViewFocusState.focused) {
+      _setAppVisibility(true);
+      return;
+    }
+
+    _handleAppBackgrounding('view_focus_lost');
+  }
+
   /// Resume background imports when app comes to foreground
   void _resumeBackgroundImports() {
     try {
       // The BackgroundImportService will automatically resume from persisted queue
       // We just need to ensure it's initialized if the vault is unlocked
       if (mounted) {
-        final authService = _authService ?? Provider.of<AuthService>(context, listen: false);
+        final authService =
+            _authService ?? Provider.of<AuthService>(context, listen: false);
         if (authService.appState == AppState.unlocked) {
           // Background import service will auto-resume when vault is accessed
-          debugPrint('[App] App resumed - background imports will auto-resume if needed');
+          debugPrint(
+              '[App] App resumed - background imports will auto-resume if needed');
         }
       }
     } catch (e) {
       debugPrint('[App] Error resuming background imports: $e');
     }
   }
-  
+
   /// Lock the vault if it's currently unlocked
   void _lockVaultIfUnlocked() {
     try {
-      // Don't auto-lock when WiFi Transfer server is running (user may be uploading from computer)
-      if (mounted) {
-        try {
-          final wifiTransfer = Provider.of<WiFiTransferService>(context, listen: false);
-          if (wifiTransfer.isRunning) {
-            debugPrint('[App] WiFi Transfer server running - not auto-locking vault');
-            return;
-          }
-        } catch (_) {}
-      }
-
       // Use cached reference or get from context if available
-      final authService = _authService ?? (mounted ? Provider.of<AuthService>(context, listen: false) : null);
-      
+      final authService = _authService ??
+          (mounted ? Provider.of<AuthService>(context, listen: false) : null);
+
       if (authService == null) {
         debugPrint('[App] Cannot lock vault - AuthService not available');
         return;
       }
-      
+
+      if (_isLifecycleLockInProgress) {
+        return;
+      }
+
       // Always return to the home experience when backgrounded (security).
       // Also ensure we pop any pushed vault routes (detail viewers etc) so the unlock screen is visible on resume.
-      if (authService.appState == AppState.unlocked || authService.appState == AppState.locked) {
-        debugPrint('[App] App went to background - locking vault and returning to unlock screen');
-        unawaited(
-          authService.lockVault().catchError((e) {
-            debugPrint('[App] Error locking vault (async): $e');
-          }).whenComplete(() {
-            // Pop back to the root route so the unlock screen is visible.
-            try {
-              _navigatorKey.currentState?.popUntil((route) => route.isFirst);
-            } catch (e) {
-              debugPrint('[App] Error popping routes after lock: $e');
-            }
-          }),
-        );
+      if (authService.appState != AppState.unlocked &&
+          authService.appState != AppState.locked) {
+        return;
       }
+
+      _isLifecycleLockInProgress = true;
+      debugPrint(
+          '[App] App lost foreground access - locking vault and returning to unlock screen');
+      unawaited(
+        authService.lockVault().catchError((e) {
+          debugPrint('[App] Error locking vault (async): $e');
+        }).whenComplete(() {
+          _isLifecycleLockInProgress = false;
+          try {
+            _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+          } catch (e) {
+            debugPrint('[App] Error popping routes after lock: $e');
+          }
+        }),
+      );
     } catch (e) {
       debugPrint('[App] Error locking vault on background: $e');
+      _isLifecycleLockInProgress = false;
     }
+  }
+
+  void _handleAppBackgrounding(String reason) {
+    _setAppVisibility(false);
+    _lockVaultIfUnlocked();
+    _stopPanicSwitch();
+    debugPrint('[App] Background/privacy lock triggered by $reason');
+  }
+
+  void _setAppVisibility(bool isVisible) {
+    if (!mounted || _isAppVisible == isVisible) {
+      return;
+    }
+
+    setState(() {
+      _isAppVisible = isVisible;
+    });
   }
 
   @override
@@ -191,7 +228,7 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
         debugPrint('[App] Error caching AuthService: $e');
       }
     }
-    
+
     return MaterialApp(
       title: 'Nyx',
       debugShowCheckedModeBanner: false,
@@ -199,9 +236,10 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
       navigatorKey: _navigatorKey,
       home: Consumer<AuthService>(
         builder: (context, authService, _) {
-          // Show loading while checking auth state
+          Widget child;
+
           if (authService.isInitializing) {
-            return const Scaffold(
+            child = const Scaffold(
               backgroundColor: AppTheme.primary,
               body: Center(
                 child: CircularProgressIndicator(
@@ -209,26 +247,41 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp> with Widget
                 ),
               ),
             );
+          } else {
+            switch (authService.appState) {
+              case AppState.onboarding:
+                child = const OnboardingPage();
+                break;
+              case AppState.pinSetup:
+                child = const UnlockMethodSelectionPage();
+                break;
+              case AppState.disguised:
+              case AppState.locked:
+                child = const UnlockPage();
+                break;
+              case AppState.unlocked:
+                child = VaultHomePage(
+                  vaultId: authService.currentVaultId,
+                  onLockRequested: () async {
+                    await authService.lockVault();
+                    _navigatorKey.currentState
+                        ?.popUntil((route) => route.isFirst);
+                  },
+                );
+                break;
+            }
           }
-          
-          // Route based on auth state (no calculator decoy - compliant with App Store guideline 2.5.1)
-          switch (authService.appState) {
-            case AppState.onboarding:
-              return const OnboardingPage();
-            case AppState.pinSetup:
-              return const UnlockMethodSelectionPage();
-            case AppState.disguised:
-            case AppState.locked:
-              return const UnlockPage();
-            case AppState.unlocked:
-              return VaultHomePage(
-                vaultId: authService.currentVaultId,
-                onLockRequested: () async {
-                  await authService.lockVault();
-                  _navigatorKey.currentState?.popUntil((route) => route.isFirst);
-                },
-              );
-          }
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              child,
+              if (!_isAppVisible)
+                const ColoredBox(
+                  color: Colors.black,
+                ),
+            ],
+          );
         },
       ),
     );

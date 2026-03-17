@@ -4,7 +4,7 @@ import '../../../app/theme.dart';
 /// Privacy Policy page
 class PrivacyPolicyPage extends StatelessWidget {
   const PrivacyPolicyPage({super.key});
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -54,9 +54,9 @@ class PrivacyPolicyPage extends StatelessWidget {
                 ],
               ),
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Introduction
             _PolicySection(
               title: 'Introduction',
@@ -66,23 +66,23 @@ Nyx ("we", "our", or "us") is committed to protecting your privacy. This Privacy
 By using Nyx, you agree to the collection and use of information in accordance with this policy.
 ''',
             ),
-            
-            // Zero-Knowledge Architecture
+
+            // Local privacy model
             _PolicySection(
-              title: 'Zero-Knowledge Architecture',
+              title: 'Local Privacy Model',
               content: '''
-Nyx uses a zero-knowledge architecture, which means:
+Nyx is designed to keep your vault data on your device:
 
-• We never have access to your files, PIN, or encryption keys
-• All encryption and decryption happens on your device
-• Your data is encrypted before it leaves your device
-• We cannot decrypt or access your files, even if requested by law enforcement
-• If you forget your PIN, we cannot recover your data
+• We do not run a Nyx cloud storage service for your vault files
+• We do not receive your PIN, pattern, or vault contents
+• Unlock credentials are checked locally on your device
+• Optional transfer features work over your local network only
+• If you forget your unlock method, there is no account-based recovery flow inside Nyx
 
-This is a fundamental security principle of Nyx - we designed it so that even we cannot access your data.
+This local-first design limits what we can access because your files are not uploaded to our servers.
 ''',
             ),
-            
+
             // Data Collection
             _PolicySection(
               title: 'Information We Collect',
@@ -105,38 +105,38 @@ We do NOT collect:
 • Browsing history or web activity
 ''',
             ),
-            
+
             // Data Storage
             _PolicySection(
               title: 'Data Storage',
               content: '''
-All your files are stored locally on your device in an encrypted format. We do not:
+All your files are stored locally on your device. We do not:
 
 • Store your files on our servers
 • Sync your files to cloud services
 • Access your device's storage beyond what's necessary for app functionality
 • Share your data with third parties
 
-Your encrypted files remain on your device and are never transmitted to our servers.
+Your vault files remain on your device unless you explicitly export or transfer them.
 ''',
             ),
-            
+
             // Security
             _PolicySection(
               title: 'Security Measures',
               content: '''
 Nyx implements multiple layers of security:
 
-• AES-256-GCM Encryption: Military-grade encryption for all files
-• Per-File Encryption Keys: Each file has a unique encryption key
-• On-Device Encryption: All encryption happens locally
-• PIN Protection: Your master key is derived from your PIN using PBKDF2
-• Secure Storage: Sensitive data stored in iOS Keychain/Android Keystore
+• PIN or Pattern Protection: Access to the app is gated by your chosen unlock method
+• Secure Storage: Sensitive app secrets are stored in iOS Keychain / Android Keystore-backed storage where available
+• Auto-Lock: The app locks when sent to the background
+• Tamper Response: Failed-attempt tracking and optional strict wipe protections are available
+• Local-Only Handling: Nyx does not upload vault files to its own backend
 
 Despite these measures, no method of transmission or storage is 100% secure. We cannot guarantee absolute security.
 ''',
             ),
-            
+
             // How We Use Information
             _PolicySection(
               title: 'How We Use Your Information',
@@ -156,7 +156,7 @@ We do not use your information for:
 • Tracking your activity outside the app
 ''',
             ),
-            
+
             // Third-Party Services
             _PolicySection(
               title: 'Third-Party Services',
@@ -165,7 +165,7 @@ Nyx uses the following third-party services:
 
 • Apple App Store / Google Play Store: For subscription purchases and app distribution. Payment processing is handled entirely by Apple/Google.
 
-• Device Storage: For storing encrypted files locally on your device. Files are encrypted before being written to storage.
+• Device Storage: For storing vault files locally on your device.
 
 • Local Network (WiFi Transfer): When using the WiFi file transfer feature, files are transferred over your local network only. No data is transmitted over the internet.
 
@@ -179,10 +179,10 @@ These services have their own privacy policies. We recommend reviewing them.
               content: '''
 We do not share, sell, or rent your personal information to third parties. The only exception is:
 
-• Legal Requirements: We may disclose information if required by law or in response to valid legal requests, though due to our zero-knowledge architecture, we cannot provide access to encrypted files even if legally compelled.
+• Legal Requirements: We may disclose information if required by law or in response to valid legal requests. Because Nyx does not host your vault files on our servers, we generally do not possess those files to provide.
 ''',
             ),
-            
+
             // Your Rights
             _PolicySection(
               title: 'Your Rights',
@@ -198,7 +198,7 @@ You have the right to:
 Since we don't store your data on our servers, you have full control over your information.
 ''',
             ),
-            
+
             // Data Retention
             _PolicySection(
               title: 'Data Retention',
@@ -208,7 +208,7 @@ Since we don't store your data on our servers, you have full control over your i
 • App Usage Data: Anonymous usage data may be retained for app improvement purposes
 ''',
             ),
-            
+
             // International Users
             _PolicySection(
               title: 'International Users',
@@ -217,7 +217,7 @@ Nyx is designed to work entirely on your device. Your data does not cross intern
 Since we don't store your data on our servers, you have full control over your information.
 ''',
             ),
-            
+
             // Children's Privacy
             _PolicySection(
               title: 'Children\'s Privacy',
@@ -225,7 +225,7 @@ Since we don't store your data on our servers, you have full control over your i
 Nyx is not intended for children under the age of 13. We do not knowingly collect personal information from children under 13. If you are a parent or guardian and believe your child has provided us with personal information, please contact us.
 ''',
             ),
-            
+
             // Changes to Policy
             _PolicySection(
               title: 'Changes to This Privacy Policy',
@@ -239,7 +239,7 @@ We may update our Privacy Policy from time to time. We will notify you of any ch
 You are advised to review this Privacy Policy periodically for any changes. Changes to this Privacy Policy are effective when they are posted on this page.
 ''',
             ),
-            
+
             // Compliance
             _PolicySection(
               title: 'Compliance',
@@ -251,7 +251,7 @@ This Privacy Policy complies with:
 • Other applicable privacy laws
 ''',
             ),
-            
+
             // Disclaimer
             _PolicySection(
               title: 'Disclaimer',
@@ -270,10 +270,10 @@ You are advised to review this Privacy Policy periodically for any changes.
               content: '''
 We do not share, sell, or rent your personal information to third parties. The only exception is:
 
-• Legal Requirements: We may disclose information if required by law or in response to valid legal requests, though due to our zero-knowledge architecture, we cannot provide access to encrypted files even if legally compelled.
+• Legal Requirements: We may disclose information if required by law or in response to valid legal requests. Because Nyx does not host your vault files on our servers, we generally do not possess those files to provide.
 ''',
             ),
-            
+
             // Data Retention
             _PolicySection(
               title: 'Data Retention',
@@ -283,7 +283,7 @@ We do not share, sell, or rent your personal information to third parties. The o
 • App Usage Data: Anonymous usage data may be retained for app improvement purposes
 ''',
             ),
-            
+
             // International Users
             _PolicySection(
               title: 'International Users',
@@ -291,7 +291,7 @@ We do not share, sell, or rent your personal information to third parties. The o
 Nyx is designed to work entirely on your device. Your data does not cross international borders because it never leaves your device. All processing happens locally.
 ''',
             ),
-            
+
             // Contact
             _PolicySection(
               title: 'Contact Us',
@@ -304,7 +304,7 @@ Website: https://nyx.app/privacy
 We are committed to protecting your privacy and will respond to your inquiries promptly.
 ''',
             ),
-            
+
             // Compliance
             _PolicySection(
               title: 'Compliance',
@@ -316,7 +316,7 @@ This Privacy Policy complies with:
 • Other applicable privacy laws
 ''',
             ),
-            
+
             // Disclaimer
             _PolicySection(
               title: 'Disclaimer',
@@ -329,9 +329,9 @@ While Nyx implements strong security measures, no system is completely secure. U
 We are committed to protecting your privacy and will respond to your inquiries promptly.
 ''',
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Footer
             Container(
               padding: const EdgeInsets.all(16),
@@ -349,7 +349,7 @@ We are committed to protecting your privacy and will respond to your inquiries p
                 textAlign: TextAlign.center,
               ),
             ),
-            
+
             const SizedBox(height: 24),
           ],
         ),
@@ -361,12 +361,12 @@ We are committed to protecting your privacy and will respond to your inquiries p
 class _PolicySection extends StatelessWidget {
   final String title;
   final String content;
-  
+
   const _PolicySection({
     required this.title,
     required this.content,
   });
-  
+
   @override
   Widget build(BuildContext context) {
     return Padding(
