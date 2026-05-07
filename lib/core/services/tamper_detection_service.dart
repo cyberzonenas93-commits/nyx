@@ -3,18 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'auth_service.dart';
+import 'vault_service.dart';
 
 /// Service for detecting tampering and optionally wiping data
 /// Supports standard mode (lockouts) and strict mode (irreversible wipe)
 class TamperDetectionService {
   final AuthService _authService;
+  final VaultService _vaultService;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   bool _strictModeEnabled = false;
   int _failedAttempts = 0;
   static const int maxFailedAttempts = 5;
 
-  TamperDetectionService(this._authService);
+  TamperDetectionService(this._authService, this._vaultService);
 
   /// Check if strict mode is enabled
   Future<bool> isStrictModeEnabled() async {
@@ -107,6 +109,7 @@ class TamperDetectionService {
     try {
       _failedAttempts = 0;
       await _authService.lockVault();
+      await _vaultService.clearDecryptedCache();
 
       // Clear all secure storage
       await _secureStorage.deleteAll();

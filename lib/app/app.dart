@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'theme.dart';
 import '../core/services/permission_service.dart';
 import '../core/services/auth_service.dart';
+import '../core/services/vault_service.dart';
 import '../core/services/panic_switch_service.dart';
 import '../features/onboarding/pages/onboarding_page.dart';
 import '../features/unlock/pages/unlock_page.dart';
@@ -26,6 +27,7 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
   bool _isAppVisible = true;
   bool _isLifecycleLockInProgress = false;
   AuthService? _authService; // Cache reference for lifecycle callbacks
+  VaultService? _vaultService; // Cache reference for lifecycle callbacks
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
@@ -36,9 +38,10 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _requestPermissionsOnLaunch();
       _initPanicSwitch();
-      // Cache AuthService reference for lifecycle callbacks
+      // Cache service references for lifecycle callbacks
       if (mounted) {
         _authService = Provider.of<AuthService>(context, listen: false);
+        _vaultService = Provider.of<VaultService>(context, listen: false);
       }
     });
   }
@@ -163,6 +166,8 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
       // Use cached reference or get from context if available
       final authService = _authService ??
           (mounted ? Provider.of<AuthService>(context, listen: false) : null);
+      final vaultService = _vaultService ??
+          (mounted ? Provider.of<VaultService>(context, listen: false) : null);
 
       if (authService == null) {
         debugPrint('[App] Cannot lock vault - AuthService not available');
@@ -184,7 +189,11 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
       debugPrint(
           '[App] App lost foreground access - locking vault and returning to unlock screen');
       unawaited(
-        authService.lockVault().catchError((e) {
+        authService.lockVault().then((_) {
+          unawaited(vaultService?.clearDecryptedCache().catchError((e) {
+            debugPrint('[App] Error clearing decrypted cache (async): $e');
+          }));
+        }).catchError((e) {
           debugPrint('[App] Error locking vault (async): $e');
         }).whenComplete(() {
           _isLifecycleLockInProgress = false;
@@ -220,12 +229,19 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
 
   @override
   Widget build(BuildContext context) {
-    // Update cached AuthService reference when context is available
+    // Update cached service references when context is available
     if (mounted && _authService == null) {
       try {
         _authService = Provider.of<AuthService>(context, listen: false);
       } catch (e) {
         debugPrint('[App] Error caching AuthService: $e');
+      }
+    }
+    if (mounted && _vaultService == null) {
+      try {
+        _vaultService = Provider.of<VaultService>(context, listen: false);
+      } catch (e) {
+        debugPrint('[App] Error caching VaultService: $e');
       }
     }
 
@@ -263,7 +279,10 @@ class _MediaPrivacyVaultAppState extends State<MediaPrivacyVaultApp>
                 child = VaultHomePage(
                   vaultId: authService.currentVaultId,
                   onLockRequested: () async {
+                    final vaultService = _vaultService ??
+                        Provider.of<VaultService>(context, listen: false);
                     await authService.lockVault();
+                    await vaultService.clearDecryptedCache();
                     _navigatorKey.currentState
                         ?.popUntil((route) => route.isFirst);
                   },

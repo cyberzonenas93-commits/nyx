@@ -100,7 +100,7 @@ class VideoPosterBackgroundService extends ChangeNotifier {
       final thumbPath = _vaultService.getThumbnailPath(item.id);
       if (thumbPath != null && File(thumbPath).existsSync()) continue;
 
-      final filePath = _vaultService.getFilePath(item.id);
+      final filePath = await _vaultService.getDecryptedFilePath(item.id);
       if (filePath == null) continue;
 
       final file = File(filePath);

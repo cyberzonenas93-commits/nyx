@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/vault_item.dart';
 import 'vault_service.dart';
@@ -132,9 +133,10 @@ class BackgroundImportService {
       'metadata': task.metadata,
       'deleteOriginal': task.deleteOriginal,
       'folderId': task.folderId,
+      'sourceAssetId': task.sourceAssetId,
     };
   }
-  
+
   /// Convert JSON to ImportTask
   ImportTask _taskFromJson(Map<String, dynamic> json) {
     return ImportTask(
@@ -145,6 +147,7 @@ class BackgroundImportService {
       metadata: json['metadata'] as Map<String, dynamic>?,
       deleteOriginal: json['deleteOriginal'] as bool? ?? false,
       folderId: json['folderId'] as String?,
+      sourceAssetId: json['sourceAssetId'] as String?,
     );
   }
   
@@ -387,6 +390,15 @@ class BackgroundImportService {
       }
     }
     
+    // Delete source PHAsset if requested (auto-delete originals from Photos library)
+    if (task.sourceAssetId != null) {
+      try {
+        await PhotoManager.editor.deleteWithIds([task.sourceAssetId!]);
+      } catch (e) {
+        debugPrint('[BackgroundImportService] Error deleting PHAsset ${task.sourceAssetId}: $e');
+      }
+    }
+
     // Delete original if needed
     if (task.deleteOriginal) {
       try {
@@ -434,7 +446,11 @@ class ImportTask {
   final Map<String, dynamic>? metadata;
   final bool deleteOriginal;
   final String? folderId; // Optional folder ID to store the file in
-  
+  /// ID of the originating PHAsset (from PhotoManager/AssetPicker).
+  /// When non-null the asset will be deleted from the Photos library after
+  /// a successful import (see [BackgroundImportService._processImportTask]).
+  final String? sourceAssetId;
+
   ImportTask({
     required this.filePath,
     required this.filename,
@@ -443,6 +459,7 @@ class ImportTask {
     this.metadata,
     this.deleteOriginal = false,
     this.folderId,
+    this.sourceAssetId,
   });
 }
 

@@ -351,7 +351,7 @@ ${sections.join('\n')}
   /// Called asynchronously after storeFile; failures are logged only.
   Future<void> _saveUploadToGallery(VaultItem item) async {
     if (item.type != VaultItemType.photo && item.type != VaultItemType.video) return;
-    final filePath = _vaultService.getFilePath(item.id);
+    final filePath = await _vaultService.getDecryptedFilePath(item.id);
     if (filePath == null) return;
     final file = File(filePath);
     if (!await file.exists()) return;
@@ -392,7 +392,7 @@ ${sections.join('\n')}
 
   Future<Response> _handleDownload(Request request, String itemId) async {
     if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
-    final path = _vaultService.getFilePath(itemId);
+    final path = await _vaultService.getDecryptedFilePath(itemId);
     if (path == null) return _cors(Response.notFound('Not found'));
     final file = File(path);
     if (!await file.exists()) return _cors(Response.notFound('Not found'));
@@ -430,7 +430,7 @@ ${sections.join('\n')}
       encoder.create(zipPath, level: ZipFileEncoder.gzip);
       final usedNames = <String, int>{};
       for (final item in items) {
-        final filePath = _vaultService.getFilePath(item.id);
+        final filePath = await _vaultService.getDecryptedFilePath(item.id);
         if (filePath == null) continue;
         final f = File(filePath);
         if (!await f.exists()) continue;

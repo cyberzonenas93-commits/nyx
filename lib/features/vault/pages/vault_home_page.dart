@@ -62,6 +62,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
   Timer? _importBannerDismissTimer;
   bool _foldersMinimized = false;
   bool _filesMinimized = false;
+  bool _autoDeleteOriginals = false;
 
   // Avoid repeatedly queuing thumbnail generation from the UI.
   final Set<String> _requestedMissingThumbnails = <String>{};
@@ -113,6 +114,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
     setState(() {
       _foldersMinimized = prefs.getBool('vault_folders_minimized') ?? false;
       _filesMinimized = prefs.getBool('vault_files_minimized') ?? false;
+      _autoDeleteOriginals = prefs.getBool('auto_delete_originals') ?? false;
     });
   }
 
@@ -298,6 +300,7 @@ class _VaultHomePageState extends State<VaultHomePage> {
           resolved.add(<String, Object>{
             'path': file.path,
             'timestampMs': tsMs,
+            'assetId': pickedAssets[i].id,
           });
         } else {
           skipped++;
@@ -360,11 +363,14 @@ class _VaultHomePageState extends State<VaultHomePage> {
               filename: (entry['path'] as String).split('/').last,
               mimeType: 'video/mp4',
               source: VaultItemSource.import,
-              deleteOriginal: false, // Never delete from Photos library
+              deleteOriginal: false,
               folderId: _currentFolderId,
               metadata: <String, dynamic>{
                 'timestampMs': entry['timestampMs'] as int,
               },
+              sourceAssetId: _autoDeleteOriginals
+                  ? entry['assetId'] as String?
+                  : null,
             ))
         .toList();
 
@@ -1023,8 +1029,10 @@ class _VaultHomePageState extends State<VaultHomePage> {
         return;
       }
       final authService = Provider.of<AuthService>(context, listen: false);
+      final vaultService = Provider.of<VaultService>(context, listen: false);
       final navigator = Navigator.of(context, rootNavigator: true);
       await authService.lockVault();
+      unawaited(vaultService.clearDecryptedCache());
       if (!mounted) return;
       // Force navigation to PIN screen so it always shows (no reliance on Consumer rebuild).
       navigator.pushAndRemoveUntil(
@@ -4940,92 +4948,115 @@ class _VaultHomePageState extends State<VaultHomePage> {
         borderRadius:
             BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLarge)),
       ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: AppTheme.accent),
-              title: const Text('Take Photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _capturePhoto();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: AppTheme.accent),
-              title: const Text('Import Photos'),
-              onTap: () {
-                Navigator.pop(context);
-                _importPhotos();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam, color: AppTheme.accent),
-              title: const Text('Record Video'),
-              onTap: () {
-                Navigator.pop(context);
-                _recordVideo();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_library, color: AppTheme.accent),
-              title: const Text('Import Videos'),
-              onTap: () {
-                Navigator.pop(context);
-                _importVideos();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder, color: AppTheme.accent),
-              title: const Text('Import Files'),
-              onTap: () {
-                Navigator.pop(context);
-                _importFiles();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.auto_fix_high, color: AppTheme.accent),
-              title: const Text('Remove duplicates'),
-              subtitle: const Text('Detect and delete duplicate files'),
-              onTap: () async {
-                Navigator.pop(context);
-                final vaultService =
-                    Provider.of<VaultService>(context, listen: false);
-                if (!mounted) return;
-                setState(() {
-                  _isImporting = true;
-                  _importProgress = 0;
-                  _importTotal = 0;
-                  _importStatus = 'Scanning for duplicates...';
-                });
-                final removed = await vaultService.removeDuplicates(
-                    onProgress: (current, total, status) {
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: AppTheme.accent),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _capturePhoto();
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.photo_library, color: AppTheme.accent),
+                title: const Text('Import Photos'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _importPhotos();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam, color: AppTheme.accent),
+                title: const Text('Record Video'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _recordVideo();
+                },
+              ),
+              ListTile(
+                leading:
+                    const Icon(Icons.video_library, color: AppTheme.accent),
+                title: const Text('Import Videos'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _importVideos();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder, color: AppTheme.accent),
+                title: const Text('Import Files'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _importFiles();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_fix_high, color: AppTheme.accent),
+                title: const Text('Remove duplicates'),
+                subtitle: const Text('Detect and delete duplicate files'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final vaultService =
+                      Provider.of<VaultService>(context, listen: false);
                   if (!mounted) return;
                   setState(() {
                     _isImporting = true;
                     _importProgress = 0;
                     _importTotal = 0;
-                    _importStatus = status;
+                    _importStatus = 'Scanning for duplicates...';
                   });
-                });
-                if (!mounted) return;
-                setState(() {
-                  _isImporting = false;
-                  _importProgress = 0;
-                  _importTotal = 0;
-                  _importStatus = null;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Removed $removed duplicate(s)'),
-                    backgroundColor: AppTheme.accent,
-                    duration: const Duration(seconds: 3),
-                  ),
-                );
-              },
-            ),
-          ],
+                  final removed = await vaultService.removeDuplicates(
+                      onProgress: (current, total, status) {
+                    if (!mounted) return;
+                    setState(() {
+                      _isImporting = true;
+                      _importProgress = 0;
+                      _importTotal = 0;
+                      _importStatus = status;
+                    });
+                  });
+                  if (!mounted) return;
+                  setState(() {
+                    _isImporting = false;
+                    _importProgress = 0;
+                    _importTotal = 0;
+                    _importStatus = null;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Removed $removed duplicate(s)'),
+                      backgroundColor: AppTheme.accent,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 1),
+              SwitchListTile(
+                secondary:
+                    const Icon(Icons.delete_sweep, color: AppTheme.accent),
+                title: const Text('Delete originals after import'),
+                subtitle: const Text(
+                  'Automatically remove imported photos/videos from your Photos library',
+                ),
+                value: _autoDeleteOriginals,
+                activeColor: AppTheme.accent,
+                onChanged: (value) async {
+                  setSheetState(() {});
+                  setState(() {
+                    _autoDeleteOriginals = value;
+                  });
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setBool('auto_delete_originals', value);
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

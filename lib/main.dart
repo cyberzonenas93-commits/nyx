@@ -61,7 +61,7 @@ void main() async {
   }
   final subscriptionService = SubscriptionService();
   final panicSwitchService = PanicSwitchService();
-  final tamperDetectionService = TamperDetectionService(authService);
+  final tamperDetectionService = TamperDetectionService(authService, vaultService);
   final browserSessionService = BrowserSessionService();
   final mediaPlaybackManager = MediaPlaybackManager();
   final videoPosterBackgroundService = VideoPosterBackgroundService(vaultService, mediaPlaybackManager);

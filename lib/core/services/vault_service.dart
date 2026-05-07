@@ -17,6 +17,7 @@ import '../models/album.dart';
 import '../models/vault_folder.dart';
 import 'encryption_service.dart';
 import 'thumbnail_cache_service.dart';
+import 'vault_cipher.dart';
 
 /// Process image thumbnail in isolate (must be top-level function)
 Uint8List? _processImageThumbnail(Uint8List imageData) {
@@ -57,8 +58,11 @@ class VaultService extends ChangeNotifier {
   static const String _kTimestampMsMetadataKey = 'timestampMs';
   static const String _kTagsMetadataKey = 'tags';
 
-  final EncryptionService _encryptionService; // Used for PIN authentication, not file encryption
+  final EncryptionService _encryptionService; // Used for PIN authentication and file encryption primitives
   final ThumbnailCacheService _thumbnailCacheService;
+  final VaultCipher _cipher;
+  static const String kEncryptionVersion = 'aes-gcm-v1';
+  static const String kEncryptionMetadataKey = 'encryption';
   
   Directory? _vaultDirectory; // Always local storage
   Directory? _thumbnailsDirectory;
@@ -96,6 +100,12 @@ class VaultService extends ChangeNotifier {
   // Video frame extraction is memory-heavy; running many at once can crash the app.
   Future<void> _thumbnailGenerationChain = Future.value();
   int _pendingThumbnailJobs = 0;
+
+  // Decrypted-to-temp file cache. Maps vault item id → live temp file path.
+  // Files in this map live in `getTemporaryDirectory()` (not iCloud-backed).
+  // Cleared on lock; deleted on dispose.
+  final Map<String, String> _decryptedTempPaths = {};
+  Directory? _decryptedTempDir;
 
   Future<String> _computeSha256ForFilePath(String filePath) async {
     final file = File(filePath);
@@ -365,7 +375,9 @@ class VaultService extends ChangeNotifier {
     notifyListeners();
   }
   
-  VaultService(this._encryptionService) : _thumbnailCacheService = ThumbnailCacheService();
+  VaultService(this._encryptionService)
+      : _thumbnailCacheService = ThumbnailCacheService(),
+        _cipher = VaultCipher(_encryptionService);
   
   /// Cleanup resources
   @override
@@ -446,12 +458,22 @@ class VaultService extends ChangeNotifier {
     
     _isInitialized = true;
     notifyListeners();
-    
+
+    // Wipe any decrypted-to-temp leftovers from a previous session before any
+    // reads can spawn new ones.
+    unawaited(clearDecryptedCache());
+
     // Defer heavy work so vault launches faster; run in background
     unawaited(_ensureThumbnailCacheInitialized().then((_) {
       debugPrint('[VaultService] Thumbnail cache ready');
     }).catchError((e) {
       debugPrint('[VaultService] Thumbnail cache init error: $e');
+    }));
+
+    // One-time migration: encrypt any plaintext files left over from before
+    // encryption-at-rest was introduced. Resumable; idempotent.
+    unawaited(_migratePlaintextFilesToEncrypted().catchError((e) {
+      debugPrint('[VaultService] Encryption migration error: $e');
     }));
     if (doICloudBackup) {
       unawaited(_initializeICloudBackup().catchError((e) {
@@ -485,6 +507,86 @@ class VaultService extends ChangeNotifier {
     }
   }
   
+  /// Walk every item; if it isn't yet marked encrypted, encrypt the on-disk
+  /// file in place (atomic rename) and update its metadata. Existing plaintext
+  /// copies in the iCloud ubiquity container will be overwritten with
+  /// ciphertext on the next sync pass because [File.lastModified] changes.
+  Future<void> _migratePlaintextFilesToEncrypted() async {
+    if (_currentMasterKey == null || _vaultDirectory == null) return;
+    final masterKey = _currentMasterKey!;
+    bool anyChanged = false;
+
+    for (var i = 0; i < _items.length; i++) {
+      final item = _items[i];
+      if (_isItemEncrypted(item)) continue;
+      final path = _resolveVaultFilePathForItem(item);
+      if (path == null) continue;
+      final src = File(path);
+      if (!await src.exists()) continue;
+
+      // Skip files that already look like ciphertext (defensive — should not
+      // happen since metadata is the source of truth, but treat as already
+      // migrated and just tag the metadata so we don't keep retrying).
+      if (await VaultCipher.looksEncrypted(src)) {
+        _markItemEncrypted(i);
+        anyChanged = true;
+        continue;
+      }
+
+      final tmp = File('$path.enc.tmp');
+      try {
+        if (await tmp.exists()) await tmp.delete();
+        await _cipher.encryptStreamToFile(
+          masterKey: masterKey,
+          fileId: item.id,
+          source: src,
+          dest: tmp,
+        );
+        // Atomic replace.
+        await tmp.rename(path);
+        _markItemEncrypted(i);
+        anyChanged = true;
+
+        // Re-prime iCloud sync if enabled so the cloud copy is overwritten.
+        if (_useICloudBackup == true && _iCloudBackupDirectory != null) {
+          if (!_iCloudSyncQueue.contains(item.id)) {
+            _iCloudSyncQueue.add(item.id);
+          }
+        }
+
+        // Yield so UI / playback isn't blocked.
+        await Future.delayed(const Duration(milliseconds: 5));
+      } catch (e) {
+        debugPrint('[VaultService] Migration failed for ${item.id}: $e');
+        try {
+          if (await tmp.exists()) await tmp.delete();
+        } catch (_) {}
+      }
+    }
+
+    if (anyChanged) {
+      await _saveIndex();
+      notifyListeners();
+      // Kick the iCloud sync queue if enabled.
+      if (_useICloudBackup == true &&
+          _iCloudBackupDirectory != null &&
+          !_isSyncingToICloud) {
+        unawaited(_processICloudSyncQueue());
+      }
+    }
+  }
+
+  /// Exposed for integration tests only. Idempotent; safe to call multiple times.
+  @visibleForTesting
+  Future<void> runEncryptionMigration() => _migratePlaintextFilesToEncrypted();
+
+  void _markItemEncrypted(int index) {
+    final item = _items[index];
+    final meta = Map<String, dynamic>.from(item.metadata ?? const {});
+    meta[kEncryptionMetadataKey] = kEncryptionVersion;
+    _items[index] = item.copyWith(metadata: meta, isEncrypted: true);
+  }
+
   /// Initialize iCloud backup directory (for background sync)
   /// Files are stored locally first, then synced to iCloud in background
   Future<void> _initializeICloudBackup() async {
@@ -619,12 +721,27 @@ class VaultService extends ChangeNotifier {
       _items.clear();
       return;
     }
-    
+
     try {
-      final content = await _indexFile!.readAsString();
+      final raw = await _indexFile!.readAsBytes();
+      String content;
+      if (raw.isNotEmpty && raw[0] == VaultCipher.versionByte) {
+        if (_currentMasterKey == null) {
+          debugPrint('[VaultService] Warning: items.json is encrypted but master key is null — skipping load');
+          return;
+        }
+        final decrypted = _cipher.decryptBytes(
+          masterKey: _currentMasterKey!,
+          fileId: 'index:items',
+          onDisk: raw,
+        );
+        content = utf8.decode(decrypted);
+      } else {
+        content = utf8.decode(raw);
+      }
       final json = jsonDecode(content) as Map<String, dynamic>;
       final itemsJson = json['items'] as List<dynamic>? ?? [];
-      
+
       _items.clear();
       _items.addAll(
         itemsJson.map((item) => VaultItem.fromJson(item as Map<String, dynamic>))
@@ -646,26 +763,29 @@ class VaultService extends ChangeNotifier {
   /// Uses streaming JSON encoding for large indexes to reduce memory usage
   Future<void> _saveIndex() async {
     if (_indexFile == null) return;
-    
+
     try {
-      // For large indexes, use streaming approach
+      // For large indexes, build JSON string via string builder then encrypt/write
       if (_items.length > 1000) {
+        final sb = StringBuffer();
+        sb.write('{"version":1,"lastUpdated":"${DateTime.now().toIso8601String()}","items":[');
+        for (int i = 0; i < _items.length; i++) {
+          if (i > 0) sb.write(',');
+          sb.write(jsonEncode(_items[i].toJson()));
+        }
+        sb.write(']}');
+        final jsonStr = sb.toString();
+
         final tempFile = File('${_indexFile!.path}.tmp');
-        final sink = tempFile.openWrite();
-        try {
-          sink.write('{"version":1,"lastUpdated":"${DateTime.now().toIso8601String()}","items":[');
-          for (int i = 0; i < _items.length; i++) {
-            if (i > 0) sink.write(',');
-            sink.write(jsonEncode(_items[i].toJson()));
-            // Flush periodically for large indexes
-            if (i % 100 == 0) {
-              await sink.flush();
-            }
-          }
-          sink.write(']}');
-          await sink.flush();
-        } finally {
-          await sink.close();
+        if (_currentMasterKey != null) {
+          final ciphertext = _cipher.encryptBytes(
+            masterKey: _currentMasterKey!,
+            fileId: 'index:items',
+            plaintext: Uint8List.fromList(utf8.encode(jsonStr)),
+          );
+          await tempFile.writeAsBytes(ciphertext);
+        } else {
+          await tempFile.writeAsString(jsonStr);
         }
         // Atomic rename
         await tempFile.rename(_indexFile!.path);
@@ -676,12 +796,21 @@ class VaultService extends ChangeNotifier {
           'lastUpdated': DateTime.now().toIso8601String(),
           'items': _items.map((item) => item.toJson()).toList(),
         };
-        
-        final content = jsonEncode(json);
+
+        final jsonStr = jsonEncode(json);
         final tempFile = File('${_indexFile!.path}.tmp');
-        
+
         // Atomic write: write to temp, then rename
-        await tempFile.writeAsString(content);
+        if (_currentMasterKey != null) {
+          final ciphertext = _cipher.encryptBytes(
+            masterKey: _currentMasterKey!,
+            fileId: 'index:items',
+            plaintext: Uint8List.fromList(utf8.encode(jsonStr)),
+          );
+          await tempFile.writeAsBytes(ciphertext);
+        } else {
+          await tempFile.writeAsString(jsonStr);
+        }
         await tempFile.rename(_indexFile!.path);
       }
     } catch (e) {
@@ -701,9 +830,24 @@ class VaultService extends ChangeNotifier {
       debugPrint('[VaultService] Created ${_albums.length} default albums (file didn\'t exist)');
       return;
     }
-    
+
     try {
-      final content = await _albumsFile!.readAsString();
+      final raw = await _albumsFile!.readAsBytes();
+      String content;
+      if (raw.isNotEmpty && raw[0] == VaultCipher.versionByte) {
+        if (_currentMasterKey == null) {
+          debugPrint('[VaultService] Warning: albums.json is encrypted but master key is null — skipping load');
+          return;
+        }
+        final decrypted = _cipher.decryptBytes(
+          masterKey: _currentMasterKey!,
+          fileId: 'index:albums',
+          onDisk: raw,
+        );
+        content = utf8.decode(decrypted);
+      } else {
+        content = utf8.decode(raw);
+      }
       final json = jsonDecode(content) as Map<String, dynamic>;
       final albumsJson = json['albums'] as List<dynamic>? ?? [];
       
@@ -736,18 +880,27 @@ class VaultService extends ChangeNotifier {
   /// Save albums to disk (atomic write)
   Future<void> _saveAlbums() async {
     if (_albumsFile == null) return;
-    
+
     try {
       final json = {
         'version': 1,
         'lastUpdated': DateTime.now().toIso8601String(),
         'albums': _albums.map((album) => album.toJson()).toList(),
       };
-      
-      final content = jsonEncode(json);
+
+      final jsonStr = jsonEncode(json);
       final tempFile = File('${_albumsFile!.path}.tmp');
-      
-      await tempFile.writeAsString(content);
+
+      if (_currentMasterKey != null) {
+        final ciphertext = _cipher.encryptBytes(
+          masterKey: _currentMasterKey!,
+          fileId: 'index:albums',
+          plaintext: Uint8List.fromList(utf8.encode(jsonStr)),
+        );
+        await tempFile.writeAsBytes(ciphertext);
+      } else {
+        await tempFile.writeAsString(jsonStr);
+      }
       await tempFile.rename(_albumsFile!.path);
     } catch (e) {
       debugPrint('[VaultService] Error saving albums: $e');
@@ -761,9 +914,24 @@ class VaultService extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    
+
     try {
-      final content = await _foldersFile!.readAsString();
+      final raw = await _foldersFile!.readAsBytes();
+      String content;
+      if (raw.isNotEmpty && raw[0] == VaultCipher.versionByte) {
+        if (_currentMasterKey == null) {
+          debugPrint('[VaultService] Warning: folders.json is encrypted but master key is null — skipping load');
+          return;
+        }
+        final decrypted = _cipher.decryptBytes(
+          masterKey: _currentMasterKey!,
+          fileId: 'index:folders',
+          onDisk: raw,
+        );
+        content = utf8.decode(decrypted);
+      } else {
+        content = utf8.decode(raw);
+      }
       final json = jsonDecode(content) as Map<String, dynamic>;
       final foldersJson = json['folders'] as List<dynamic>? ?? [];
       
@@ -783,18 +951,27 @@ class VaultService extends ChangeNotifier {
   /// Save folders to disk (atomic write)
   Future<void> _saveFolders() async {
     if (_foldersFile == null) return;
-    
+
     try {
       final json = {
         'version': 1,
         'lastUpdated': DateTime.now().toIso8601String(),
         'folders': _folders.map((folder) => folder.toJson()).toList(),
       };
-      
-      final content = jsonEncode(json);
+
+      final jsonStr = jsonEncode(json);
       final tempFile = File('${_foldersFile!.path}.tmp');
-      
-      await tempFile.writeAsString(content);
+
+      if (_currentMasterKey != null) {
+        final ciphertext = _cipher.encryptBytes(
+          masterKey: _currentMasterKey!,
+          fileId: 'index:folders',
+          plaintext: Uint8List.fromList(utf8.encode(jsonStr)),
+        );
+        await tempFile.writeAsBytes(ciphertext);
+      } else {
+        await tempFile.writeAsString(jsonStr);
+      }
       await tempFile.rename(_foldersFile!.path);
     } catch (e) {
       debugPrint('[VaultService] Error saving folders: $e');
@@ -1132,34 +1309,42 @@ class VaultService extends ChangeNotifier {
     final vaultFileName = extension != null ? '$fileId.$extension' : fileId;
     final vaultRelativePath = vaultFileName; // Relative to vault directory
     
-    // Write file to vault directory (unencrypted - raw storage)
-    // For large files, use streaming write to reduce memory pressure
+    // Write file to vault directory, encrypted at rest with AES-256-GCM.
+    // Per-file key is derived from the master key + fileId; format is documented
+    // in VaultCipher. iCloud sync (when enabled) copies these ciphertext bytes
+    // unchanged, so plaintext never leaves the device.
+    if (_currentMasterKey == null) {
+      throw StateError('Cannot store file: vault master key is not set');
+    }
     final filePath = '${_vaultDirectory!.path}/$vaultRelativePath';
     final file = File(filePath);
-    
-    if (data.length > 5 * 1024 * 1024) {
-      // Large file - use streaming write with smaller chunks to reduce memory pressure
-      // This is especially important when video is playing simultaneously
-      final sink = file.openWrite();
-      try {
-        // Use smaller chunks to reduce memory pressure
-        const chunkSize = 512 * 1024; // 512KB chunks (smaller for better memory management)
+
+    final sink = file.openWrite();
+    try {
+      final encrypter = _cipher.beginEncrypt(
+        masterKey: _currentMasterKey!,
+        fileId: fileId,
+        dest: sink,
+      );
+      if (data.length > 5 * 1024 * 1024) {
+        // Large file: feed in 512 KB pieces and yield periodically to keep
+        // the UI responsive and avoid memory spikes during simultaneous video playback.
+        const chunkSize = 512 * 1024;
         for (int i = 0; i < data.length; i += chunkSize) {
           final end = (i + chunkSize < data.length) ? i + chunkSize : data.length;
-          sink.add(data.sublist(i, end));
-          // Yield more frequently to prevent memory pressure and allow video playback
+          encrypter.add(data.sublist(i, end));
           if (i % (chunkSize * 2) == 0) {
             await sink.flush();
-            await Future.delayed(const Duration(milliseconds: 5)); // Allow memory cleanup and video playback
+            await Future.delayed(const Duration(milliseconds: 5));
           }
         }
-        await sink.flush();
-      } finally {
-        await sink.close();
+      } else {
+        encrypter.add(data);
       }
-    } else {
-      // Small file - write all at once
-      await file.writeAsBytes(data);
+      encrypter.finalize();
+      await sink.flush();
+    } finally {
+      await sink.close();
     }
     
     // Defer thumbnail generation - create item first, generate thumbnail later
@@ -1172,21 +1357,22 @@ class VaultService extends ChangeNotifier {
       timestampMs: DateTime.now().millisecondsSinceEpoch,
       sha256Digest: incomingDigest,
     );
+    mergedMetadata[kEncryptionMetadataKey] = kEncryptionVersion;
     final item = VaultItem(
       id: fileId,
       originalFilename: filename,
       type: fileType,
       mimeType: mimeType,
-      sizeBytes: data.length,
+      sizeBytes: data.length, // plaintext size for UI / dedup
       dateAdded: DateTime.now(),
       source: source,
       sourceUrl: sourceUrl,
       sourceSite: sourceSite,
-      thumbnailId: null, // Deprecated - use thumbnailPath
-      thumbnailPath: null, // Will be set later
-      vaultRelativePath: vaultRelativePath, // Store relative path
+      thumbnailId: null,
+      thumbnailPath: null,
+      vaultRelativePath: vaultRelativePath,
       metadata: mergedMetadata,
-      isEncrypted: false, // Files are stored unencrypted (vault access is still protected)
+      isEncrypted: true,
     );
     
     _items.add(item);
@@ -1334,9 +1520,17 @@ class VaultService extends ChangeNotifier {
       debugPrint('[VaultService] Copying file (size unknown yet): $sourceFilePath -> $destPath');
     }
 
+    if (_currentMasterKey == null) {
+      throw StateError('Cannot store file: vault master key is not set');
+    }
     final hashSink = _SingleDigestSink();
     final hashInput = sha256.startChunkedConversion(hashSink);
     final destSink = destFile.openWrite();
+    final encrypter = _cipher.beginEncrypt(
+      masterKey: _currentMasterKey!,
+      fileId: fileId,
+      dest: destSink,
+    );
     int bytesCopied = 0;
     bool copySucceeded = false;
     final idleTimeout = Platform.isIOS ? const Duration(seconds: 120) : const Duration(seconds: 30);
@@ -1350,8 +1544,8 @@ class VaultService extends ChangeNotifier {
       )) {
         final chunk = iterator.current;
         if (chunk.isEmpty) continue;
-        hashInput.add(chunk);
-        destSink.add(chunk);
+        hashInput.add(chunk); // plaintext hash for dedup
+        encrypter.add(chunk); // ciphertext to disk
         bytesCopied += chunk.length;
 
         // Yield periodically so UI remains responsive during huge copies.
@@ -1360,6 +1554,7 @@ class VaultService extends ChangeNotifier {
           await Future.delayed(const Duration(milliseconds: 1));
         }
       }
+      encrypter.finalize();
       await destSink.flush();
       copySucceeded = true;
       debugPrint('[VaultService] File copy completed: $destPath (${(bytesCopied / 1024 / 1024).toStringAsFixed(2)} MB)');
@@ -1420,12 +1615,13 @@ class VaultService extends ChangeNotifier {
       timestampMs: sourceTimestampMs ?? DateTime.now().millisecondsSinceEpoch,
       sha256Digest: incomingDigest.isNotEmpty ? incomingDigest : null,
     );
+    mergedMetadata[kEncryptionMetadataKey] = kEncryptionVersion;
     final item = VaultItem(
       id: fileId,
       originalFilename: filename,
       type: fileType,
       mimeType: mimeType,
-      sizeBytes: bytesCopied,
+      sizeBytes: bytesCopied, // plaintext byte count for UI / dedup
       dateAdded: DateTime.now(),
       source: source,
       sourceUrl: sourceUrl,
@@ -1433,7 +1629,7 @@ class VaultService extends ChangeNotifier {
       thumbnailPath: null, // Will be set later
       vaultRelativePath: vaultRelativePath,
       metadata: mergedMetadata,
-      isEncrypted: false,
+      isEncrypted: true,
     );
     
     _items.add(item);
@@ -1494,11 +1690,31 @@ class VaultService extends ChangeNotifier {
     return _generateThumbnail(fileId, filePath, type, originalData);
   }
   
-  /// Generate thumbnail for all file types
+  /// Generate thumbnail for all file types.
+  /// If the source file is encrypted, transparently decrypts to a temp file
+  /// first so VideoThumbnail / image decoding sees plaintext.
   Future<String?> _generateThumbnail(String fileId, String filePath, VaultItemType type, Uint8List? originalData) async {
     try {
       Uint8List? thumbnailData;
-      
+
+      // If we have an encrypted source and no plaintext bytes, materialize plaintext
+      // to a temp file (videos) or read decrypted bytes (photos) before decoding.
+      String workingPath = filePath;
+      final itemIdx = _items.indexWhere((i) => i.id == fileId);
+      final isEncrypted = itemIdx >= 0 && _isItemEncrypted(_items[itemIdx]);
+      if (isEncrypted) {
+        if (type == VaultItemType.photo && originalData == null) {
+          // Decrypt bytes for the image decoder.
+          originalData = await getFileData(fileId);
+        } else if (type == VaultItemType.video || type == VaultItemType.audio) {
+          // VideoThumbnail / AVAsset need a plaintext file path.
+          final decrypted = await getDecryptedFilePath(fileId);
+          if (decrypted != null) {
+            workingPath = decrypted;
+          }
+        }
+      }
+
       if (type == VaultItemType.photo) {
         // Generate thumbnail from image using compute for heavy processing
         if (originalData != null) {
@@ -1522,30 +1738,30 @@ class VaultService extends ChangeNotifier {
         }
       } else if (type == VaultItemType.video) {
         // Generate video thumbnail screenshot from FIRST FRAME (0ms) - performance requirement
-        debugPrint('[VaultService] Generating video thumbnail from first frame (0ms): $filePath');
+        debugPrint('[VaultService] Generating video thumbnail from first frame (0ms): $workingPath');
         try {
           // Verify file exists before attempting thumbnail generation
-          final videoFile = File(filePath);
+          final videoFile = File(workingPath);
           if (!await videoFile.exists()) {
-            debugPrint('[VaultService] ERROR: Video file does not exist: $filePath');
+            debugPrint('[VaultService] ERROR: Video file does not exist: $workingPath');
             thumbnailData = null;
           } else {
             final fileSize = await videoFile.length();
             debugPrint('[VaultService] Video file exists, size: $fileSize bytes');
-            
+
             if (fileSize == 0) {
-              debugPrint('[VaultService] ERROR: Video file is empty: $filePath');
+              debugPrint('[VaultService] ERROR: Video file is empty: $workingPath');
               thumbnailData = null;
             } else {
               // Anti-crash guard: skip extremely large videos on iOS (native extractor can OOM/crash)
               if (Platform.isIOS && fileSize > 750 * 1024 * 1024) {
-                debugPrint('[VaultService] iOS: skipping thumbnail for huge video (>750MB): $filePath');
+                debugPrint('[VaultService] iOS: skipping thumbnail for huge video (>750MB): $workingPath');
                 thumbnailData = null;
               } else {
               // Generate thumbnail at FIRST FRAME (0ms) - requirement for instant poster display
               try {
                 thumbnailData = await VideoThumbnail.thumbnailData(
-                  video: filePath,
+                  video: workingPath,
                   imageFormat: ImageFormat.JPEG,
                   // Reduce memory pressure on iOS
                   maxWidth: Platform.isIOS ? 240 : 320,
@@ -1554,15 +1770,15 @@ class VaultService extends ChangeNotifier {
                 ).timeout(
                   Platform.isIOS ? const Duration(seconds: 6) : const Duration(seconds: 10),
                   onTimeout: () {
-                    debugPrint('[VaultService] Video thumbnail generation timed out: $filePath');
+                    debugPrint('[VaultService] Video thumbnail generation timed out: $workingPath');
                     return null;
                   },
                 );
-                
+
                 if (thumbnailData != null) {
                   debugPrint('[VaultService] Successfully generated video thumbnail from first frame: ${thumbnailData.length} bytes');
                 } else {
-                  debugPrint('[VaultService] ERROR: Video thumbnail generation returned null for: $filePath');
+                  debugPrint('[VaultService] ERROR: Video thumbnail generation returned null for: $workingPath');
                 }
               } catch (e) {
                 debugPrint('[VaultService] Error generating video thumbnail from first frame: $e');
@@ -1672,6 +1888,93 @@ class VaultService extends ChangeNotifier {
     return noExt; // best-effort path for callers that want a deterministic value
   }
   
+  /// Returns true if the item is stored encrypted on disk.
+  bool _isItemEncrypted(VaultItem item) {
+    final flag = item.metadata?[kEncryptionMetadataKey];
+    return flag == kEncryptionVersion;
+  }
+
+  Future<Directory> _getDecryptedTempDir() async {
+    if (_decryptedTempDir != null && await _decryptedTempDir!.exists()) {
+      return _decryptedTempDir!;
+    }
+    final base = await getTemporaryDirectory();
+    final dir = Directory('${base.path}/nyx_decrypted');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    _decryptedTempDir = dir;
+    return dir;
+  }
+
+  /// Decrypt the on-disk vault file for [itemId] to a temp file (iOS `tmp/`,
+  /// not iCloud-backed) and return its absolute path.
+  ///
+  /// For plaintext (legacy) items this is identical to [getFilePath]. For
+  /// encrypted items the decrypted copy is cached for the rest of the unlocked
+  /// session and removed by [clearDecryptedCache] (called on lock).
+  Future<String?> getDecryptedFilePath(String itemId) async {
+    if (!_isInitialized) return null;
+
+    final item = _items.firstWhere(
+      (i) => i.id == itemId,
+      orElse: () => throw StateError('Item not found: $itemId'),
+    );
+    final cipherPath = _resolveVaultFilePathForItem(item);
+    if (cipherPath == null) return null;
+    if (!await File(cipherPath).exists()) {
+      debugPrint('[VaultService] Vault file missing for $itemId at $cipherPath');
+      return null;
+    }
+    if (!_isItemEncrypted(item)) {
+      // Legacy plaintext file — return as-is.
+      return cipherPath;
+    }
+    final cached = _decryptedTempPaths[itemId];
+    if (cached != null && await File(cached).exists()) {
+      return cached;
+    }
+    if (_currentMasterKey == null) {
+      throw StateError('Cannot decrypt: vault is locked');
+    }
+    final tmpDir = await _getDecryptedTempDir();
+    final extension = item.extension;
+    final tmpName = extension != null && extension.isNotEmpty
+        ? '${item.id}.$extension'
+        : item.id;
+    final tmpPath = '${tmpDir.path}/$tmpName';
+    final tmpFile = File(tmpPath);
+    if (await tmpFile.exists()) {
+      await tmpFile.delete();
+    }
+    await _cipher.decryptStreamToFile(
+      masterKey: _currentMasterKey!,
+      fileId: item.id,
+      source: File(cipherPath),
+      dest: tmpFile,
+    );
+    _decryptedTempPaths[itemId] = tmpPath;
+    return tmpPath;
+  }
+
+  /// Delete all decrypted temp files. Call on vault lock.
+  Future<void> clearDecryptedCache() async {
+    final paths = List<String>.from(_decryptedTempPaths.values);
+    _decryptedTempPaths.clear();
+    for (final p in paths) {
+      try {
+        final f = File(p);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+    if (_decryptedTempDir != null && await _decryptedTempDir!.exists()) {
+      try {
+        await _decryptedTempDir!.delete(recursive: true);
+      } catch (_) {}
+      _decryptedTempDir = null;
+    }
+  }
+
   /// Get thumbnail file path (path-first design)
   /// Returns absolute file path, or null if not found
   String? getThumbnailPath(String itemId) {
@@ -1690,27 +1993,45 @@ class VaultService extends ChangeNotifier {
     }
   }
   
-  /// Get file data from vault (legacy - only for share/export, not for viewing)
-  /// For viewing/playback, use getFilePath() instead
+  /// Read full file contents into memory, decrypting if the item is encrypted.
+  /// For large videos use [getDecryptedFilePath] (returns a temp file path) so
+  /// the player can stream from disk without holding the file in memory.
   Future<Uint8List?> getFileData(String itemId, {Uint8List? masterKey}) async {
     final startTime = DateTime.now();
     if (!_isInitialized) return null;
-    
-    final filePath = getFilePath(itemId);
+
+    final item = _items.firstWhere(
+      (i) => i.id == itemId,
+      orElse: () => throw StateError('Item not found: $itemId'),
+    );
+    final filePath = _resolveVaultFilePathForItem(item);
     if (filePath == null) return null;
-    
+
     final file = File(filePath);
     if (!await file.exists()) return null;
-    
+
     final readStart = DateTime.now();
-    final data = await file.readAsBytes();
+    final raw = await file.readAsBytes();
     final readDuration = DateTime.now().difference(readStart);
-    debugPrint('[VaultService] Reading file from disk took: ${readDuration.inMilliseconds}ms (${(data.length / 1024 / 1024).toStringAsFixed(2)} MB)');
-    
-    // Files are stored unencrypted (vault access is still protected by PIN unlock)
+    debugPrint('[VaultService] Reading file from disk took: ${readDuration.inMilliseconds}ms (${(raw.length / 1024 / 1024).toStringAsFixed(2)} MB)');
+
+    Uint8List data;
+    if (_isItemEncrypted(item)) {
+      if (_currentMasterKey == null) {
+        debugPrint('[VaultService] getFileData: cannot decrypt, master key unavailable');
+        return null;
+      }
+      data = _cipher.decryptBytes(
+        masterKey: _currentMasterKey!,
+        fileId: item.id,
+        onDisk: raw,
+      );
+    } else {
+      data = raw;
+    }
+
     final totalDuration = DateTime.now().difference(startTime);
     debugPrint('[VaultService] getFileData total time: ${totalDuration.inMilliseconds}ms');
-    
     return data;
   }
   

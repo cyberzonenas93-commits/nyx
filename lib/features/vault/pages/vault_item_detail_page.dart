@@ -53,11 +53,13 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   // Path-based file references (no Uint8List loading for viewing)
   File? _audioFile;
   File? _documentFile;
+  File? _photoFile;
   File? _tempFile; // Temp file for sharing/export
   
   // Error states
   String? _videoError;
   bool _videoInitializationFailed = false;
+  bool _videoDecrypting = false;
   
   // Services
   MediaPlaybackManager? _playbackManager;
@@ -140,8 +142,10 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         _currentItem = newItem;
         _videoError = null;
         _videoInitializationFailed = false;
+        _videoDecrypting = false;
         _audioFile = null;
         _documentFile = null;
+        _photoFile = null;
         _isPhotoFullscreen = false; // leaving photo page should restore app bar
       });
       
@@ -214,8 +218,24 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       _initializeAudioFile();
     } else if (item.type == VaultItemType.document) {
       _initializeDocumentFile();
+    } else if (item.type == VaultItemType.photo) {
+      _initializePhotoFile();
     }
-    // Photos don't need initialization - Image.file handles it
+  }
+
+  Future<void> _initializePhotoFile() async {
+    try {
+      final vaultService = Provider.of<VaultService>(context, listen: false);
+      final filePath =
+          await vaultService.getDecryptedFilePath(_currentItem.id);
+      if (filePath == null) return;
+      final f = File(filePath);
+      if (!await f.exists()) return;
+      _photoFile = f;
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('[VaultItemDetail] Error initializing photo file: $e');
+    }
   }
 
   /// Generate a first-frame poster thumbnail when a video is opened/swiped to.
@@ -232,7 +252,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
 
     Future.microtask(() async {
       try {
-        final filePath = vaultService.getFilePath(item.id);
+        final filePath = await vaultService.getDecryptedFilePath(item.id);
         if (filePath == null) return;
 
         // iOS safety gate: skip very large videos and unknown containers (reduces crash risk).
@@ -276,7 +296,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     if (_isGeneratingPoster) return;
 
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final filePath = vaultService.getFilePath(item.id);
+    final filePath = await vaultService.getDecryptedFilePath(item.id);
     if (filePath == null) return;
 
     if (Platform.isIOS) {
@@ -400,21 +420,25 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     
     final initId = ++_currentVideoInitId; // Monotonic counter for cancellation
     final videoInitStart = DateTime.now();
-    
+
+    if (mounted) setState(() => _videoDecrypting = true);
+
     try {
       // Get file path directly from vault (no memory loading, no temp file)
       final vaultService = Provider.of<VaultService>(context, listen: false);
-      final videoFilePath = vaultService.getFilePath(item.id);
-      
+      final videoFilePath = await vaultService.getDecryptedFilePath(item.id);
+
+      if (mounted) setState(() => _videoDecrypting = false);
+
       if (videoFilePath == null) {
         throw Exception('Video file not found in vault');
       }
-      
+
       final videoFile = File(videoFilePath);
       if (!await videoFile.exists()) {
         throw Exception('Video file does not exist: $videoFilePath');
       }
-      
+
       // Check if cancelled or item changed
       if (!mounted || _currentItem.id != item.id || _currentVideoInitId != initId) {
         debugPrint('[VaultItemDetail] Video initialization cancelled: item changed');
@@ -512,15 +536,17 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       await _videoController?.dispose();
       _videoController = null;
       _activeVideoItemId = null;
+    } finally {
+      if (mounted) setState(() => _videoDecrypting = false);
     }
   }
-  
+
   Future<void> _initializeAudioFile() async {
     final audioInitStart = DateTime.now();
     try {
       // Get file path from vault (path-first design)
       final vaultService = Provider.of<VaultService>(context, listen: false);
-      final filePath = vaultService.getFilePath(_currentItem.id);
+      final filePath = await vaultService.getDecryptedFilePath(_currentItem.id);
       
       if (filePath == null) {
         throw Exception('Audio file not found in vault');
@@ -707,7 +733,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     try {
       // Get file path from vault (path-first design)
       final vaultService = Provider.of<VaultService>(context, listen: false);
-      final filePath = vaultService.getFilePath(_currentItem.id);
+      final filePath = await vaultService.getDecryptedFilePath(_currentItem.id);
       
       if (filePath == null) {
         throw Exception('Document file not found in vault');
@@ -1230,18 +1256,18 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     );
   }
   
-  void _showConvertToAudioDialog() {
+  Future<void> _showConvertToAudioDialog() async {
     final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
     final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
-    
+
     if (!hasPremium) {
       _showPaywall();
       return;
     }
-    
+
     // Get video file path
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final videoFilePath = vaultService.getFilePath(_currentItem.id);
+    final videoFilePath = await vaultService.getDecryptedFilePath(_currentItem.id);
     
     if (videoFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1327,7 +1353,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   Future<void> _convertVideoToAudio(String audioFormat) async {
     // Get video file path (path-first design)
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final videoFilePath = vaultService.getFilePath(_currentItem.id);
+    final videoFilePath = await vaultService.getDecryptedFilePath(_currentItem.id);
     
     if (videoFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1876,42 +1902,55 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         );
       } else if (_videoInitializationFailed) {
         return _buildVideoError();
+      } else if (_videoDecrypting) {
+        // Decryption in progress - show loading overlay on top of the thumbnail
+        return Container(
+          color: Colors.black54,
+          child: const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Colors.white),
+                SizedBox(height: 12),
+                Text(
+                  'Preparing video…',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+        );
       } else {
-        // Video initializing - show thumbnail (already in background)
+        // Video initializing (controller setup, not yet decrypting) -
+        // show thumbnail (already in background)
         return const SizedBox.shrink();
       }
     }
     
-    // For photos: show Image.file with ResizeImage
+    // For photos: show Image.file with ResizeImage. Uses the pre-loaded
+    // _photoFile (decrypted to temp on initialization) when present.
     if (item.type == VaultItemType.photo) {
-      final vaultService = Provider.of<VaultService>(context, listen: false);
-      final filePath = vaultService.getFilePath(item.id);
-      if (filePath != null) {
-        final photoFile = File(filePath);
-        if (photoFile.existsSync()) {
-          return PhotoViewerWidget(
-            imageFile: photoFile,
-            title: item.displayName,
-            onDismiss: () {
-              if (mounted) Navigator.of(context).pop();
-            },
-            onFullscreenChanged: (isFullscreen) {
-              if (!mounted) return;
-              setState(() {
-                _isPhotoFullscreen = isFullscreen;
-              });
-            },
-          );
-        }
+      if (_photoFile != null && _photoFile!.existsSync()) {
+        return PhotoViewerWidget(
+          imageFile: _photoFile!,
+          title: item.displayName,
+          onDismiss: () {
+            if (mounted) Navigator.of(context).pop();
+          },
+          onFullscreenChanged: (isFullscreen) {
+            if (!mounted) return;
+            setState(() {
+              _isPhotoFullscreen = isFullscreen;
+            });
+          },
+        );
       }
       return _buildPlaceholder(item);
     }
-    
+
     // For audio: show player
     if (item.type == VaultItemType.audio) {
-      final vaultService = Provider.of<VaultService>(context, listen: false);
-      final filePath = vaultService.getFilePath(item.id);
-      if (filePath != null && _audioFile != null) {
+      if (_audioFile != null) {
         return AudioPlayerWidget(
           audioPath: _audioFile!.path,
           title: item.displayName,
