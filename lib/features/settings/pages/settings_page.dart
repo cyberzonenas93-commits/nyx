@@ -856,6 +856,10 @@ class _StorageSettingsTile extends StatefulWidget {
 class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   bool? _useICloudStorage;
   bool _isLoading = true;
+  bool _isBackfilling = false;
+  int? _backfillCurrent;
+  int? _backfillTotal;
+  String? _backfillPhase;
 
   @override
   void initState() {
@@ -889,9 +893,9 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       return 'Local storage (Android)';
     }
     if (_useICloudStorage == null) {
-      return 'Auto-detect (iCloud if available)';
+      return 'Local storage with encrypted iCloud backup if available';
     } else if (_useICloudStorage == true) {
-      return 'iCloud Drive';
+      return 'Local storage + encrypted iCloud backup';
     } else {
       return 'Local storage';
     }
@@ -900,6 +904,80 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   bool _isStorageSelectionAvailable() {
     // Storage selection only available on iOS/macOS
     return Platform.isIOS || Platform.isMacOS;
+  }
+
+  bool _canRunICloudBackfill() {
+    return Platform.isIOS && _useICloudStorage != false;
+  }
+
+  String _formatBackfillResult(ICloudBackfillResult result) {
+    if (!result.changed) {
+      return 'iCloud backfill complete. Nothing needed.';
+    }
+
+    return 'iCloud backfill complete: encrypted ${result.localFilesEncrypted}, synced ${result.cloudFilesWritten}, removed ${result.deletedPlaintextCloudFiles}.';
+  }
+
+  String _backfillButtonLabel() {
+    if (!_isBackfilling) return 'Run iCloud Backfill';
+    final current = _backfillCurrent;
+    final total = _backfillTotal;
+    if (current != null && total != null && total > 0) {
+      return 'Backfilling $current/$total';
+    }
+    return _backfillPhase ?? 'Starting backfill...';
+  }
+
+  Future<void> _runICloudBackfill() async {
+    if (_isBackfilling) return;
+
+    setState(() {
+      _isBackfilling = true;
+      _backfillCurrent = null;
+      _backfillTotal = null;
+      _backfillPhase = 'Starting backfill...';
+    });
+
+    try {
+      final vaultService = Provider.of<VaultService>(context, listen: false);
+      final result =
+          await vaultService.runICloudEncryptionBackfillFromUserAction(
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() {
+            _backfillCurrent = progress.current;
+            _backfillTotal = progress.total;
+            _backfillPhase = progress.phase;
+          });
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_formatBackfillResult(result)),
+          backgroundColor: AppTheme.accent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('iCloud backfill failed: $e'),
+          backgroundColor: AppTheme.warning,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBackfilling = false;
+          _backfillCurrent = null;
+          _backfillTotal = null;
+          _backfillPhase = null;
+        });
+      }
+    }
   }
 
   Future<void> _showStorageDialog() async {
@@ -932,7 +1010,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Storage preference updated. Restart the app for changes to take effect.',
+              'Storage preference updated. Existing vault files will sync to iCloud automatically in the background.',
             ),
             backgroundColor: AppTheme.accent,
             duration: const Duration(seconds: 4),
@@ -965,11 +1043,36 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       );
     }
 
-    return _SettingsTile(
-      icon: Icons.storage,
-      title: 'Vault Storage',
-      subtitle: _getStorageSubtitle(),
-      onTap: _isStorageSelectionAvailable() ? _showStorageDialog : null,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _SettingsTile(
+          icon: Icons.storage,
+          title: 'Vault Storage',
+          subtitle: _getStorageSubtitle(),
+          onTap: _isStorageSelectionAvailable() ? _showStorageDialog : null,
+        ),
+        if (_canRunICloudBackfill())
+          Padding(
+            padding: const EdgeInsets.only(left: 72, right: 16, bottom: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _isBackfilling ? null : _runICloudBackfill,
+                icon: _isBackfilling
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_upload_outlined),
+                label: Text(
+                  _backfillButtonLabel(),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -989,7 +1092,7 @@ class _StorageSelectionDialog extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusLarge),
       ),
       title: const Text(
-        'Vault Storage Location',
+        'Vault Storage Backup',
         style: TextStyle(
           color: AppTheme.text,
           fontSize: 20,
@@ -1002,9 +1105,9 @@ class _StorageSelectionDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _StorageOption(
-              title: 'iCloud Drive',
+              title: 'Local + Encrypted iCloud Backup',
               description:
-                  'Slower read and write speeds, but provides a way to recover your data if your device is lost or damaged. Your encrypted vault will sync across your Apple devices.',
+                  'Files stay local for fast access. Encrypted backup copies are written to the app iCloud container after unlock.',
               icon: Icons.cloud,
               isSelected: currentPreference == true,
               onTap: () => Navigator.of(context).pop('icloud'),
@@ -1022,7 +1125,7 @@ class _StorageSelectionDialog extends StatelessWidget {
             _StorageOption(
               title: 'Auto-Detect',
               description:
-                  'Automatically use iCloud if available, otherwise use local storage. This is the default setting.',
+                  'Use encrypted iCloud backup when available, otherwise keep local storage only. This is the default setting.',
               icon: Icons.auto_awesome,
               isSelected: currentPreference == null,
               onTap: () => Navigator.of(context).pop('auto'),
@@ -1047,7 +1150,7 @@ class _StorageSelectionDialog extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Note: Changing storage location requires restarting the app to take effect.',
+                      'Note: Files are always stored locally first for best performance. iCloud receives encrypted backup copies in the background.',
                       style: TextStyle(
                         color: AppTheme.text.withOpacity(0.8),
                         fontSize: 12,

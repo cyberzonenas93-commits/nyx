@@ -15,6 +15,8 @@ import '../../../features/unlock/pages/pin_setup_page.dart';
 import '../../settings/pages/security_page.dart';
 import '../../../core/services/multi_vault_service.dart';
 import 'vault_management_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/services/simple_video_import_service.dart';
 
 /// Vault settings page accessible from within the vault
 class VaultSettingsPage extends StatefulWidget {
@@ -590,6 +592,8 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
                 ),
                 onTap: _generateVideoPostersSafe,
               ),
+              const Divider(height: 1),
+              const _DeleteOriginalsSettingTile(),
             ],
           ),
 
@@ -753,6 +757,10 @@ class _StorageSettingsTile extends StatefulWidget {
 class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   bool? _useICloudStorage;
   bool _isLoading = true;
+  bool _isBackfilling = false;
+  int? _backfillCurrent;
+  int? _backfillTotal;
+  String? _backfillPhase;
 
   @override
   void initState() {
@@ -786,9 +794,9 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       return 'Local storage (Android)';
     }
     if (_useICloudStorage == null) {
-      return 'Local storage (iCloud backup auto-enabled)';
+      return 'Local storage with encrypted iCloud backup if available';
     } else if (_useICloudStorage == true) {
-      return 'Local storage + iCloud backup';
+      return 'Local storage + encrypted iCloud backup';
     } else {
       return 'Local storage only';
     }
@@ -797,6 +805,80 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   bool _isStorageSelectionAvailable() {
     // Storage selection only available on iOS/macOS
     return Platform.isIOS || Platform.isMacOS;
+  }
+
+  bool _canRunICloudBackfill() {
+    return Platform.isIOS && _useICloudStorage != false;
+  }
+
+  String _formatBackfillResult(ICloudBackfillResult result) {
+    if (!result.changed) {
+      return 'iCloud backfill complete. Nothing needed.';
+    }
+
+    return 'iCloud backfill complete: encrypted ${result.localFilesEncrypted}, synced ${result.cloudFilesWritten}, removed ${result.deletedPlaintextCloudFiles}.';
+  }
+
+  String _backfillButtonLabel() {
+    if (!_isBackfilling) return 'Run iCloud Backfill';
+    final current = _backfillCurrent;
+    final total = _backfillTotal;
+    if (current != null && total != null && total > 0) {
+      return 'Backfilling $current/$total';
+    }
+    return _backfillPhase ?? 'Starting backfill...';
+  }
+
+  Future<void> _runICloudBackfill() async {
+    if (_isBackfilling) return;
+
+    setState(() {
+      _isBackfilling = true;
+      _backfillCurrent = null;
+      _backfillTotal = null;
+      _backfillPhase = 'Starting backfill...';
+    });
+
+    try {
+      final vaultService = Provider.of<VaultService>(context, listen: false);
+      final result =
+          await vaultService.runICloudEncryptionBackfillFromUserAction(
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() {
+            _backfillCurrent = progress.current;
+            _backfillTotal = progress.total;
+            _backfillPhase = progress.phase;
+          });
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_formatBackfillResult(result)),
+          backgroundColor: AppTheme.accent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('iCloud backfill failed: $e'),
+          backgroundColor: AppTheme.warning,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBackfilling = false;
+          _backfillCurrent = null;
+          _backfillTotal = null;
+          _backfillPhase = null;
+        });
+      }
+    }
   }
 
   Future<void> _showStorageDialog() async {
@@ -829,7 +911,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Storage preference updated. iCloud backup will start automatically in the background.',
+              'Storage preference updated. Existing vault files will sync to iCloud automatically in the background.',
             ),
             backgroundColor: AppTheme.accent,
             duration: const Duration(seconds: 4),
@@ -862,29 +944,54 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
       );
     }
 
-    return ListTile(
-      leading: const Icon(Icons.storage, color: AppTheme.accent),
-      title: const Text(
-        'Vault Storage',
-        style: TextStyle(
-          color: AppTheme.text,
-          fontWeight: FontWeight.w500,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          leading: const Icon(Icons.storage, color: AppTheme.accent),
+          title: const Text(
+            'Vault Storage',
+            style: TextStyle(
+              color: AppTheme.text,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          subtitle: Text(
+            _getStorageSubtitle(),
+            style: TextStyle(
+              color: AppTheme.text.withOpacity(0.6),
+              fontSize: 12,
+            ),
+          ),
+          trailing: _isStorageSelectionAvailable()
+              ? Icon(
+                  Icons.chevron_right,
+                  color: AppTheme.text.withOpacity(0.4),
+                )
+              : null,
+          onTap: _isStorageSelectionAvailable() ? _showStorageDialog : null,
         ),
-      ),
-      subtitle: Text(
-        _getStorageSubtitle(),
-        style: TextStyle(
-          color: AppTheme.text.withOpacity(0.6),
-          fontSize: 12,
-        ),
-      ),
-      trailing: _isStorageSelectionAvailable()
-          ? Icon(
-              Icons.chevron_right,
-              color: AppTheme.text.withOpacity(0.4),
-            )
-          : null,
-      onTap: _isStorageSelectionAvailable() ? _showStorageDialog : null,
+        if (_canRunICloudBackfill())
+          Padding(
+            padding: const EdgeInsets.only(left: 72, right: 16, bottom: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _isBackfilling ? null : _runICloudBackfill,
+                icon: _isBackfilling
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_upload_outlined),
+                label: Text(
+                  _backfillButtonLabel(),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -901,7 +1008,7 @@ class _StorageSelectionDialog extends StatelessWidget {
     return AlertDialog(
       backgroundColor: AppTheme.surface,
       title: const Text(
-        'Vault Storage Location',
+        'Vault Storage Backup',
         style: TextStyle(
           color: AppTheme.text,
           fontSize: 20,
@@ -914,9 +1021,9 @@ class _StorageSelectionDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _StorageOption(
-              title: 'Local + iCloud Backup',
+              title: 'Local + Encrypted iCloud Backup',
               description:
-                  'Files stored locally for fast access. Automatically backed up to iCloud in the background. Best of both worlds: performance and backup protection.',
+                  'Files stay local for fast access. Encrypted backup copies are written to the app iCloud container after unlock.',
               icon: Icons.cloud_sync,
               isSelected: currentPreference == true,
               onTap: () => Navigator.of(context).pop('icloud'),
@@ -934,7 +1041,7 @@ class _StorageSelectionDialog extends StatelessWidget {
             _StorageOption(
               title: 'Auto (Recommended)',
               description:
-                  'Local storage with automatic iCloud backup if available. Optimal performance with backup protection. This is the default setting.',
+                  'Use encrypted iCloud backup when available, otherwise keep local storage only. This is the default setting.',
               icon: Icons.auto_awesome,
               isSelected: currentPreference == null,
               onTap: () => Navigator.of(context).pop('auto'),
@@ -956,7 +1063,7 @@ class _StorageSelectionDialog extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Note: Files are always stored locally first for best performance. iCloud is used for automatic backup in the background.',
+                      'Note: Files are always stored locally first for best performance. iCloud receives encrypted backup copies in the background.',
                       style: TextStyle(
                         color: AppTheme.text.withOpacity(0.8),
                         fontSize: 12,
@@ -1054,6 +1161,113 @@ class _StorageOption extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Opt-in for removing originals from Photos after a successful import.
+///
+/// Defaults to OFF. Deleting a user's source media is destructive and
+/// irreversible, so it must be a deliberate choice rather than a side effect of
+/// importing.
+class _DeleteOriginalsSettingTile extends StatefulWidget {
+  const _DeleteOriginalsSettingTile();
+
+  @override
+  State<_DeleteOriginalsSettingTile> createState() =>
+      _DeleteOriginalsSettingTileState();
+}
+
+class _DeleteOriginalsSettingTileState
+    extends State<_DeleteOriginalsSettingTile> {
+  bool _enabled = false;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _enabled = prefs.getBool(kAlwaysDeleteOriginalsKey) ?? false;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _set(bool value) async {
+    // Deleting originals is the default, so switching it ON needs no warning.
+    // Switching it OFF is the surprising direction — the vault stops being a
+    // move and starts leaving copies behind in Photos — so explain that once.
+    if (!value) {
+      final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: AppTheme.surface,
+              title: const Text('Keep originals in Photos?',
+                  style: TextStyle(color: AppTheme.text)),
+              content: Text(
+                'Imported photos and videos will also stay in your Photos '
+                'library, so anyone with access to your device can still see '
+                'them there.',
+                style: TextStyle(color: AppTheme.text.withOpacity(0.8)),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text('Keep originals',
+                      style: TextStyle(color: AppTheme.warning)),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!confirmed) return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kAlwaysDeleteOriginalsKey, value);
+      if (!mounted) return;
+      setState(() => _enabled = value);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save setting: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary:
+          const Icon(Icons.delete_sweep_outlined, color: AppTheme.accent),
+      title: const Text(
+        'Always Delete Originals',
+        style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        _enabled
+            ? 'Originals are removed from Photos without asking'
+            : 'You are asked after each import',
+        style: TextStyle(color: AppTheme.text.withOpacity(0.6), fontSize: 12),
+      ),
+      value: _enabled,
+      onChanged: _loading ? null : _set,
+      activeColor: AppTheme.accent,
     );
   }
 }

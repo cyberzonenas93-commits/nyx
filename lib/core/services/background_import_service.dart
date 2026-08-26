@@ -20,6 +20,8 @@ class BackgroundImportService {
   Completer<void>? _processingCompleter;
   static const String _queueKey = 'background_import_queue';
   static const String _processingKey = 'background_import_processing';
+  late final Future<void> _loadQueueFuture;
+  int _activeRunTotal = 0;
 
   // Perf + stability: SharedPreferences writes are expensive.
   // Persisting the entire queue after every file turns into O(n²) work for large batches (e.g. 200+ items)
@@ -29,35 +31,53 @@ class BackgroundImportService {
   int _sinceLastPersist = 0;
   static const Duration _persistMinInterval = Duration(seconds: 2);
   static const int _persistEveryNItems = 5;
-  
+
   BackgroundImportService(this._vaultService) {
     _progressController = StreamController<ImportProgress>.broadcast();
-    _loadPersistedQueue();
+    _loadQueueFuture = _loadPersistedQueue();
   }
-  
+
   /// Stream of import progress updates
   Stream<ImportProgress> get progressStream => _progressController!.stream;
-  
+
   /// Add files to import queue
   Future<void> queueImports(List<ImportTask> tasks) async {
+    if (tasks.isEmpty) return;
+
+    await _loadQueueFuture;
     _importQueue.addAll(tasks);
-    await _persistQueue();
-    if (!_isProcessing) {
-      _startBackgroundProcessing();
+    if (_isProcessing) {
+      _activeRunTotal += tasks.length;
+      await _persistQueueThrottled();
+      return;
     }
+
+    await _persistQueue();
+    _startBackgroundProcessing();
   }
-  
+
+  bool _isVideoImportTask(ImportTask task) {
+    final lowerName = task.filename.toLowerCase();
+    return (task.mimeType?.toLowerCase().startsWith('video/') ?? false) ||
+        lowerName.endsWith('.mp4') ||
+        lowerName.endsWith('.mov') ||
+        lowerName.endsWith('.m4v') ||
+        lowerName.endsWith('.avi') ||
+        lowerName.endsWith('.mkv') ||
+        lowerName.endsWith('.webm');
+  }
+
   /// Start background processing (can continue when app is backgrounded)
   void _startBackgroundProcessing() {
     if (_isProcessing) return;
-    
+
     // Request background execution to keep app active
     final bgService = BackgroundExecutionService();
     bgService.requestBackgroundExecution(reason: 'Importing files to vault');
-    
+
     _processQueue(); // Start processing - this will continue even when backgrounded
   }
-  
+
   Future<SharedPreferences> _getPrefs() async {
     return _prefs ??= await SharedPreferences.getInstance();
   }
@@ -71,19 +91,18 @@ class BackgroundImportService {
         final List<dynamic> tasksJson = jsonDecode(queueJson);
         _importQueue.clear();
         _importQueue.addAll(tasksJson.map((json) => _taskFromJson(json)));
-        
-        // Check if processing was in progress
-        final wasProcessing = prefs.getBool(_processingKey) ?? false;
-        if (wasProcessing && _importQueue.isNotEmpty) {
-          // Resume processing
-          _startBackgroundProcessing();
+
+        // Restore the queue only. Do not resume automatically on launch/unlock;
+        // large file imports should only restart after an explicit user action.
+        if (prefs.getBool(_processingKey) == true) {
+          await prefs.setBool(_processingKey, false);
         }
       }
     } catch (e) {
       debugPrint('[BackgroundImportService] Error loading persisted queue: $e');
     }
   }
-  
+
   /// Persist queue to storage
   Future<void> _persistQueue() async {
     try {
@@ -111,7 +130,7 @@ class BackgroundImportService {
       await _persistQueue();
     }
   }
-  
+
   /// Clear persisted queue
   Future<void> _clearPersistedQueue() async {
     try {
@@ -119,10 +138,12 @@ class BackgroundImportService {
       await prefs.remove(_queueKey);
       await prefs.remove(_processingKey);
     } catch (e) {
-      debugPrint('[BackgroundImportService] Error clearing persisted queue: $e');
+      debugPrint(
+        '[BackgroundImportService] Error clearing persisted queue: $e',
+      );
     }
   }
-  
+
   /// Convert ImportTask to JSON
   Map<String, dynamic> _taskToJson(ImportTask task) {
     return {
@@ -150,38 +171,42 @@ class BackgroundImportService {
       sourceAssetId: json['sourceAssetId'] as String?,
     );
   }
-  
+
   /// Process the import queue in background
   /// Can continue even when app is backgrounded (uses persistent Future)
   Future<void> _processQueue() async {
     if (_isProcessing) return;
     _isProcessing = true;
     await _persistQueue(); // Force at start
-    
+
     // Start processing without awaiting - allows it to continue when app is backgrounded
     // The Future will continue running even if the app goes to background
     _processQueueInternal().catchError((e) {
-      debugPrint('[BackgroundImportService] Error in background processing: $e');
+      debugPrint(
+        '[BackgroundImportService] Error in background processing: $e',
+      );
       _isProcessing = false;
     });
   }
-  
+
   /// Internal processing loop that continues even when backgrounded
   Future<void> _processQueueInternal() async {
-    int total = _importQueue.length;
+    _activeRunTotal = _importQueue.length;
     int completed = 0;
     int failed = 0;
-    
+
     while (_importQueue.isNotEmpty) {
       // Check if video is playing - pause imports to prevent memory pressure
       final playbackManager = MediaPlaybackManager();
       final isVideoPlaying = playbackManager.isVideoPlaying;
-      
+
       if (isVideoPlaying) {
         // Video is playing - wait a bit before processing to avoid memory pressure
-        debugPrint('[BackgroundImportService] Video playing, pausing imports to prevent memory pressure');
+        debugPrint(
+          '[BackgroundImportService] Video playing, pausing imports to prevent memory pressure',
+        );
         await Future.delayed(const Duration(milliseconds: 500));
-        
+
         // Check again - if still playing, wait longer
         final stillPlaying = playbackManager.isVideoPlaying;
         if (stillPlaying) {
@@ -190,41 +215,36 @@ class BackgroundImportService {
           continue; // Skip this iteration, check again next time
         }
       }
-      
+
       final task = _importQueue.removeFirst();
-      final lowerName = task.filename.toLowerCase();
-      final isVideoTask =
-          (task.mimeType?.toLowerCase().startsWith('video/') ?? false) ||
-          lowerName.endsWith('.mp4') ||
-          lowerName.endsWith('.mov') ||
-          lowerName.endsWith('.m4v') ||
-          lowerName.endsWith('.avi') ||
-          lowerName.endsWith('.mkv') ||
-          lowerName.endsWith('.webm');
-      
+      final isVideoTask = _isVideoImportTask(task);
+
       try {
+        final currentIndex = completed + failed + 1;
+        final total = _activeRunTotal;
+
         // Update progress
         final progress = ImportProgress(
-          current: completed + 1,
+          current: currentIndex,
           total: total,
           status: 'Importing ${task.filename}...',
           isComplete: false,
         );
         _progressController?.add(progress);
-        
+
         // Update background service notification
         BackgroundExecutionService().updateProgress(
-          current: completed + 1,
+          current: currentIndex,
           total: total,
           status: 'Importing ${task.filename}...',
         );
-        
+
         // Process import (waits for iCloud download on iOS if needed)
-        await _processImportTask(task, completed + 1, total);
-        
+        await _processImportTask(task, currentIndex, total);
+
         completed++;
         await _persistQueueThrottled(); // Throttled persisted state
-        
+
         // Small delay to prevent overwhelming the system
         // Longer delay for videos and when playback recently occurred to avoid iOS memory spikes.
         final delay = isVideoTask
@@ -232,32 +252,43 @@ class BackgroundImportService {
             : (isVideoPlaying ? 120 : 25);
         await Future.delayed(Duration(milliseconds: delay));
       } catch (e) {
-        debugPrint('[BackgroundImportService] Error importing ${task.filename}: $e');
+        debugPrint(
+          '[BackgroundImportService] Error importing ${task.filename}: $e',
+        );
         failed++;
         await _persistQueueThrottled(); // Update even on failure (throttled)
       }
     }
-    
+
+    final processed = completed + failed;
+
     // Final progress update
     final finalProgress = ImportProgress(
-      current: completed,
-      total: total,
+      current: processed,
+      total: _activeRunTotal,
       status: 'Import complete',
       isComplete: true,
       successCount: completed,
       failCount: failed,
     );
     _progressController?.add(finalProgress);
-    
+
     // End background execution
     BackgroundExecutionService().endBackgroundExecution();
-    
-    _isProcessing = false;
+
     // Ensure final state is persisted (then cleared) so we don't resume stale work.
     await _persistQueueThrottled(force: true);
-    await _clearPersistedQueue();
+    if (_importQueue.isEmpty) {
+      await _clearPersistedQueue();
+    }
+
+    _isProcessing = false;
+    _activeRunTotal = 0;
+    if (_importQueue.isNotEmpty) {
+      _startBackgroundProcessing();
+    }
   }
-  
+
   /// On iOS, files picked from Photos/Files may be in iCloud and not yet downloaded.
   /// Wait for the file to become available before importing.
   ///
@@ -283,7 +314,9 @@ class BackgroundImportService {
       // Try to read 1 byte with a short timeout. This triggers iCloud download.
       try {
         final stream = sourceFile.openRead(0, 1);
-        final firstChunk = await stream.first.timeout(const Duration(seconds: 2));
+        final firstChunk = await stream.first.timeout(
+          const Duration(seconds: 2),
+        );
         return firstChunk.isNotEmpty;
       } on TimeoutException {
         return false;
@@ -310,7 +343,9 @@ class BackgroundImportService {
         final length = await sourceFile.length();
         if (length > 0) return;
       } catch (e) {
-        debugPrint('[BackgroundImportService] File length check failed (attempt ${attempt + 1}): $e');
+        debugPrint(
+          '[BackgroundImportService] File length check failed (attempt ${attempt + 1}): $e',
+        );
         // Keep waiting; length() can fail while provider is downloading.
       }
 
@@ -322,23 +357,32 @@ class BackgroundImportService {
       'Open it in Photos or Files first to download it, then try importing again.',
     );
   }
-  
+
   /// Process a single import task
   /// Uses path-based streaming copy (no memory loading) - performance optimized
-  Future<void> _processImportTask(ImportTask task, int current, int total) async {
+  Future<void> _processImportTask(
+    ImportTask task,
+    int current,
+    int total,
+  ) async {
+    final isVideoTask = _isVideoImportTask(task);
+
     void reportStatus(String status) {
-      _progressController?.add(ImportProgress(
-        current: current,
-        total: total,
-        status: status,
-        isComplete: false,
-      ));
+      _progressController?.add(
+        ImportProgress(
+          current: current,
+          total: total,
+          status: status,
+          isComplete: false,
+        ),
+      );
       BackgroundExecutionService().updateProgress(
         current: current,
         total: total,
         status: status,
       );
     }
+
     await _ensureFileAvailableForImport(
       task,
       current,
@@ -349,20 +393,10 @@ class BackgroundImportService {
     if (!await sourceFile.exists()) {
       throw Exception('Source file does not exist: ${task.filePath}');
     }
-    
+
     // Use path-based storage (streaming copy) - no memory loading
     // This is the default and preferred method for all imports
-    final lowerName = task.filename.toLowerCase();
-    final isVideoTask =
-        (task.mimeType?.toLowerCase().startsWith('video/') ?? false) ||
-        lowerName.endsWith('.mp4') ||
-        lowerName.endsWith('.mov') ||
-        lowerName.endsWith('.m4v') ||
-        lowerName.endsWith('.avi') ||
-        lowerName.endsWith('.mkv') ||
-        lowerName.endsWith('.webm');
-
-    final storedItem = await _vaultService.storeFileFromPath(
+    await _vaultService.storeFileFromPath(
       sourceFilePath: task.filePath,
       folderId: task.folderId,
       filename: task.filename,
@@ -372,30 +406,19 @@ class BackgroundImportService {
       // IMPORTANT: Bulk imports can crash iOS if many video thumbnails generate concurrently.
       // We disable auto thumbnail generation here and generate video posters in a controlled, awaited way below.
       queueThumbnailGeneration: false,
-      // Also serialize video metadata extraction (VideoPlayer init) so it doesn't overlap
-      // with the next file copy when importing multiple large videos.
-      awaitVideoMetadataExtraction: isVideoTask,
+      // Video uploads are dominated by large sequential IO. Avoid a second
+      // CPU-heavy per-byte pass for duplicate detection on this path.
+      deduplicate: !isVideoTask,
     );
 
-    // For videos, generate the first-frame poster before moving to the next file.
-    // This avoids overlapping heavy video decoding with the next file copy.
-    // Runs serialized (VaultService thumbnail queue) to reduce crash risk.
-    if (storedItem.type == VaultItemType.video) {
-      reportStatus('Generating video thumbnail: ${task.filename}...');
-      try {
-        await _vaultService.generateThumbnailForItem(storedItem.id);
-      } catch (e) {
-        debugPrint('[BackgroundImportService] Error generating video thumbnail for ${task.filename}: $e');
-        // Don't fail the import; UI can show a placeholder until user regenerates later.
-      }
-    }
-    
     // Delete source PHAsset if requested (auto-delete originals from Photos library)
     if (task.sourceAssetId != null) {
       try {
         await PhotoManager.editor.deleteWithIds([task.sourceAssetId!]);
       } catch (e) {
-        debugPrint('[BackgroundImportService] Error deleting PHAsset ${task.sourceAssetId}: $e');
+        debugPrint(
+          '[BackgroundImportService] Error deleting PHAsset ${task.sourceAssetId}: $e',
+        );
       }
     }
 
@@ -406,17 +429,19 @@ class BackgroundImportService {
           await sourceFile.delete();
         }
       } catch (e) {
-        debugPrint('[BackgroundImportService] Error deleting original file: $e');
+        debugPrint(
+          '[BackgroundImportService] Error deleting original file: $e',
+        );
       }
     }
   }
-  
+
   /// Cancel all pending imports
   void cancelAll() {
     _importQueue.clear();
     _isProcessing = false;
   }
-  
+
   /// Dispose resources
   void dispose() {
     _progressController?.close();
@@ -425,14 +450,12 @@ class BackgroundImportService {
     _processingCompleter?.complete();
     _processingCompleter = null;
   }
-  
+
   /// Resume processing when app comes to foreground
   Future<void> resume() async {
+    await _loadQueueFuture;
     if (_importQueue.isNotEmpty && !_isProcessing) {
-      await _loadPersistedQueue();
-      if (_importQueue.isNotEmpty) {
-        _startBackgroundProcessing();
-      }
+      _startBackgroundProcessing();
     }
   }
 }
@@ -471,7 +494,7 @@ class ImportProgress {
   final bool isComplete;
   final int? successCount;
   final int? failCount;
-  
+
   ImportProgress({
     required this.current,
     required this.total,

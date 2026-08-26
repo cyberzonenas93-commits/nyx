@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import '../config/apple_receipt_validation_config.dart';
 import '../models/subscription_tier.dart';
+import 'apple_receipt_validation_service.dart';
 
 enum PurchaseResult {
   success,
@@ -260,14 +262,9 @@ class SubscriptionService extends ChangeNotifier {
     for (var purchase in purchases) {
       if (purchase.status == PurchaseStatus.purchased ||
           purchase.status == PurchaseStatus.restored) {
-        final restoredPurchase = _handleSuccessfulPurchase(purchase);
-        if (restoredPurchase && _isRestoringPurchases) {
-          _restoreFoundActivePurchase = true;
-          _completeRestoreAttempt(RestorePurchasesResult.restored);
-        }
-        if (restoredPurchase) {
-          _completePurchaseAttempt(PurchaseResult.success);
-        }
+        // Async: optional server receipt validation, then grant + completePurchase
+        unawaited(_processPurchaseSuccess(purchase));
+        continue;
       } else if (purchase.status == PurchaseStatus.error) {
         _handlePurchaseError(purchase);
         final errorCode = purchase.error?.code.toLowerCase();
@@ -291,6 +288,41 @@ class SubscriptionService extends ChangeNotifier {
             debugPrint('Error completing purchase: $error');
           }),
         );
+      }
+    }
+  }
+
+  /// Validates App Store receipt with your backend when configured, then grants access and finishes the transaction.
+  Future<void> _processPurchaseSuccess(PurchaseDetails purchase) async {
+    try {
+      final isAppStore = purchase.verificationData.source == 'app_store';
+      if (AppleReceiptValidationConfig.isEnabled && isAppStore) {
+        final receipt = purchase.verificationData.serverVerificationData;
+        final ok = await AppleReceiptValidationService.instance
+            .validateReceipt(receipt);
+        if (!ok) {
+          debugPrint(
+            '[Subscription] Receipt validation failed — premium not granted for ${purchase.productID}',
+          );
+          return;
+        }
+      }
+
+      final restoredPurchase = _handleSuccessfulPurchase(purchase);
+      if (restoredPurchase && _isRestoringPurchases) {
+        _restoreFoundActivePurchase = true;
+        _completeRestoreAttempt(RestorePurchasesResult.restored);
+      }
+      if (restoredPurchase) {
+        _completePurchaseAttempt(PurchaseResult.success);
+      }
+    } finally {
+      if (purchase.pendingCompletePurchase) {
+        try {
+          await _inAppPurchase.completePurchase(purchase);
+        } catch (error) {
+          debugPrint('Error completing purchase: $error');
+        }
       }
     }
   }

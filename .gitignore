@@ -54,3 +54,4 @@ app.*.map.json
 /ios/Pods/
 /ios/.symlinks/
 /macos/build/
+.test_media/

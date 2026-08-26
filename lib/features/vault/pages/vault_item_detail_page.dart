@@ -32,9 +32,9 @@ class VaultItemDetailPage extends StatefulWidget {
   final VaultItem item;
   final List<VaultItem>? allItems; // All items for swipe navigation
   final int? initialIndex; // Initial index in allItems
-  
+
   const VaultItemDetailPage({
-    super.key, 
+    super.key,
     required this.item,
     this.allItems,
     this.initialIndex,
@@ -49,25 +49,25 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   VideoPlayerController? _videoController;
   String? _activeVideoItemId; // ID of item currently using the controller
   int _currentVideoInitId = 0; // Monotonic counter for cancellation
-  
+
   // Path-based file references (no Uint8List loading for viewing)
   File? _audioFile;
   File? _documentFile;
   File? _photoFile;
   File? _tempFile; // Temp file for sharing/export
-  
+
   // Error states
   String? _videoError;
   bool _videoInitializationFailed = false;
   bool _videoDecrypting = false;
-  
+
   // Services
   MediaPlaybackManager? _playbackManager;
   final MediaConverterService _converterService = MediaConverterService();
   bool _isConverting = false;
   double _conversionProgress = 0.0;
   String? _selectedAudioFormat;
-  
+
   // Page navigation
   PageController? _pageController;
   int _currentIndex = 0;
@@ -75,11 +75,9 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   bool _isVideoFullscreen = false;
   bool _isPhotoFullscreen = false;
   bool _isVideoPlaying = false;
-  
+
   // Thumbnail precaching (only for adjacent pages)
   final Set<String> _precachedThumbnails = {};
-  // On-demand video poster generation (anti-crash: only attempt once per item)
-  final Set<String> _requestedVideoPosters = {};
   bool _isGeneratingPoster = false;
   String? _posterStatus;
 
@@ -100,7 +98,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     super.initState();
     _currentItem = widget.item;
     if (widget.allItems != null && widget.allItems!.isNotEmpty) {
-      _currentIndex = widget.initialIndex ?? widget.allItems!.indexWhere((item) => item.id == widget.item.id);
+      _currentIndex = widget.initialIndex ??
+          widget.allItems!.indexWhere((item) => item.id == widget.item.id);
       if (_currentIndex < 0) _currentIndex = 0;
       _pageController = PageController(initialPage: _currentIndex);
     }
@@ -111,30 +110,32 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    
+
     // Initialize active page (thumbnail-first, then content)
     // Note: Thumbnail precaching moved to didChangeDependencies() to avoid MediaQuery access in initState
     _initializeActivePage();
   }
-  
+
   void _onPageChanged(int index) async {
-    if (widget.allItems == null || index < 0 || index >= widget.allItems!.length) return;
-    
+    if (widget.allItems == null ||
+        index < 0 ||
+        index >= widget.allItems!.length) return;
+
     final pageChangeStart = DateTime.now();
     debugPrint('[VaultItemDetail] Page changed to index: $index');
-    
+
     final newItem = widget.allItems![index];
-    
+
     // Cancel any ongoing video initialization
     _currentVideoInitId++;
-    
+
     // Dispose previous video controller synchronously (await to ensure cleanup)
     try {
       await _disposeVideoController();
     } catch (e) {
       debugPrint('[VaultItemDetail] Error disposing video controller: $e');
     }
-    
+
     // Update state immediately (thumbnail will show instantly)
     if (mounted) {
       setState(() {
@@ -148,18 +149,19 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         _photoFile = null;
         _isPhotoFullscreen = false; // leaving photo page should restore app bar
       });
-      
+
       // Precache thumbnails for adjacent pages (non-blocking)
       _precacheAdjacentThumbnails();
-      
+
       // Initialize active page content (thumbnail already shown)
       _initializeActivePage();
-      
+
       final pageChangeDuration = DateTime.now().difference(pageChangeStart);
-      debugPrint('[VaultItemDetail] Page change completed in ${pageChangeDuration.inMilliseconds}ms');
+      debugPrint(
+          '[VaultItemDetail] Page change completed in ${pageChangeDuration.inMilliseconds}ms');
     }
   }
-  
+
   /// Dispose video controller synchronously (required for single controller lifecycle)
   Future<void> _disposeVideoController() async {
     if (_videoController != null) {
@@ -177,19 +179,19 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
     }
   }
-  
+
   /// Precache thumbnails for adjacent pages (only thumbnails, not full files)
   void _precacheAdjacentThumbnails() {
     if (widget.allItems == null) return;
-    
+
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    
+
     // Precache ±2 pages
     for (int i = _currentIndex - 2; i <= _currentIndex + 2; i++) {
       if (i >= 0 && i < widget.allItems!.length && i != _currentIndex) {
         final item = widget.allItems![i];
         final thumbnailPath = vaultService.getThumbnailPath(item.id);
-        
+
         if (thumbnailPath != null && !_precachedThumbnails.contains(item.id)) {
           _precachedThumbnails.add(item.id);
           final thumbnailFile = File(thumbnailPath);
@@ -203,16 +205,14 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
     }
   }
-  
+
   /// Initialize active page content (thumbnail already shown)
   void _initializeActivePage() {
     if (!mounted) return;
-    
+
     final item = _currentItem;
-    
+
     if (item.type == VaultItemType.video) {
-      // Safe on-demand poster generation (especially important on iOS where we skip auto-generation)
-      _maybeGenerateVideoPoster(item);
       _initializeVideoPlayer();
     } else if (item.type == VaultItemType.audio) {
       _initializeAudioFile();
@@ -226,8 +226,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   Future<void> _initializePhotoFile() async {
     try {
       final vaultService = Provider.of<VaultService>(context, listen: false);
-      final filePath =
-          await vaultService.getDecryptedFilePath(_currentItem.id);
+      final filePath = await vaultService.getDecryptedFilePath(_currentItem.id);
       if (filePath == null) return;
       final f = File(filePath);
       if (!await f.exists()) return;
@@ -238,87 +237,34 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     }
   }
 
-  /// Generate a first-frame poster thumbnail when a video is opened/swiped to.
-  /// This is intentionally conservative on iOS to avoid native crashes in thumbnail extraction.
-  void _maybeGenerateVideoPoster(VaultItem item) {
-    if (item.type != VaultItemType.video) return;
-    if (_requestedVideoPosters.contains(item.id)) return;
-
-    final vaultService = Provider.of<VaultService>(context, listen: false);
-    final existingThumbPath = vaultService.getThumbnailPath(item.id);
-    if (existingThumbPath != null && File(existingThumbPath).existsSync()) return;
-
-    _requestedVideoPosters.add(item.id);
-
-    Future.microtask(() async {
-      try {
-        final filePath = await vaultService.getDecryptedFilePath(item.id);
-        if (filePath == null) return;
-
-        // iOS safety gate: skip very large videos and unknown containers (reduces crash risk).
-        if (Platform.isIOS) {
-          final lower = filePath.toLowerCase();
-          final isCommonContainer = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.m4v');
-          if (!isCommonContainer) {
-            _requestedVideoPosters.remove(item.id);
-            return;
-          }
-
-          final size = await File(filePath).length().catchError((_) => 0);
-          if (size > 300 * 1024 * 1024) {
-            // Keep placeholder for very large iOS videos; user can still play it normally.
-            _requestedVideoPosters.remove(item.id);
-            return;
-          }
-        }
-
-        await vaultService.generateThumbnailForItem(item.id);
-
-        // If thumbnail still doesn't exist, allow retry later.
-        final newThumbPath = vaultService.getThumbnailPath(item.id);
-        if (newThumbPath == null || !File(newThumbPath).existsSync()) {
-          _requestedVideoPosters.remove(item.id);
-        }
-
-        // Refresh this page so the newly generated poster displays immediately.
-        if (mounted) {
-          setState(() {});
-        }
-      } catch (e) {
-        debugPrint('[VaultItemDetail] Poster generation skipped/failed for ${item.id}: $e');
-        _requestedVideoPosters.remove(item.id);
-      }
-    });
-  }
-
   Future<void> _generatePosterManually(VaultItem item) async {
     if (item.type != VaultItemType.video) return;
     if (_isGeneratingPoster) return;
 
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final filePath = await vaultService.getDecryptedFilePath(item.id);
-    if (filePath == null) return;
 
     if (Platform.isIOS) {
-      final lower = filePath.toLowerCase();
-      final isCommonContainer = lower.endsWith('.mp4') || lower.endsWith('.mov') || lower.endsWith('.m4v');
+      final extension = item.extension;
+      final isCommonContainer =
+          extension == 'mp4' || extension == 'mov' || extension == 'm4v';
       if (!isCommonContainer) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Poster generation is disabled for this video format on iOS (stability).'),
+              content: Text(
+                  'Poster generation is disabled for this video format on iOS (stability).'),
               backgroundColor: AppTheme.warning,
             ),
           );
         }
         return;
       }
-      final size = await File(filePath).length().catchError((_) => 0);
-      if (size > 300 * 1024 * 1024) {
+      if (item.sizeBytes > 300 * 1024 * 1024) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Poster generation is disabled for very large videos on iOS (stability).'),
+              content: Text(
+                  'Poster generation is disabled for very large videos on iOS (stability).'),
               backgroundColor: AppTheme.warning,
             ),
           );
@@ -358,14 +304,14 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
     }
   }
-  
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Capture playback manager reference
-    _playbackManager = Provider.of<MediaPlaybackManager>(context, listen: false);
-    
+    _playbackManager =
+        Provider.of<MediaPlaybackManager>(context, listen: false);
+
     // Precache thumbnails for adjacent pages (MediaQuery is now available)
     // Use post-frame callback to ensure context is fully ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -379,12 +325,12 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   void dispose() {
     // Dispose video controller synchronously
     _disposeVideoController();
-    
+
     // Stop audio playback
     if (_playbackManager != null) {
       _playbackManager!.stopAll();
     }
-    
+
     // Reset orientation
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -392,32 +338,90 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    
+
     // Clean up temp files (ignore errors)
     _audioFile?.delete().catchError((_) {});
     _documentFile?.delete().catchError((_) {});
     _tempFile?.delete().catchError((_) {});
     _tempFile?.delete().catchError((_) {});
-    
+
     super.dispose();
   }
 
-  /// Get file data for share/export operations (rare - only when needed)
+  /// Get file data for share/export operations (rare - only when needed).
+  ///
+  /// Loads the entire item into memory, so it is only safe for small items.
+  /// Video export must use [_saveVideoToPhotosLibraryByPath] instead.
   Future<Uint8List?> _getFileDataForExport() async {
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
     final masterKey = authService.masterKey;
     if (masterKey == null) return null;
-    return await vaultService.getFileData(_currentItem.id, masterKey: masterKey);
+    return await vaultService.getFileData(_currentItem.id,
+        masterKey: masterKey);
   }
-  
+
+  /// Saves a video to Photos without ever holding it in memory.
+  Future<void> _saveVideoToPhotosLibraryByPath() async {
+    final vaultService = Provider.of<VaultService>(context, listen: false);
+
+    var status = await Permission.photosAddOnly.status;
+    if (!status.isGranted && !status.isLimited) {
+      status = await Permission.photosAddOnly.request();
+    }
+
+    String? decryptedPath;
+    try {
+      decryptedPath = await vaultService.getDecryptedFilePath(_currentItem.id);
+    } catch (e) {
+      debugPrint('[VaultItemDetail] Could not decrypt video for export: $e');
+    }
+
+    if (decryptedPath == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to load video'),
+            backgroundColor: AppTheme.warning,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final result = await PhotoManager.editor.saveVideo(
+        File(decryptedPath),
+        title: _currentItem.displayName,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result != null
+              ? 'Video saved to Photos library'
+              : 'Could not save video to Photos'),
+          backgroundColor: result != null ? AppTheme.accent : AppTheme.warning,
+        ),
+      );
+    } catch (e) {
+      debugPrint('[VaultItemDetail] Error saving video to Photos: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save video: $e'),
+          backgroundColor: AppTheme.warning,
+        ),
+      );
+    }
+  }
+
   /// Initialize video player using direct file path (no temp file rewriting)
   Future<void> _initializeVideoPlayer() async {
     if (!mounted) return;
-    
+
     final item = _currentItem;
     if (item.type != VaultItemType.video) return;
-    
+
     final initId = ++_currentVideoInitId; // Monotonic counter for cancellation
     final videoInitStart = DateTime.now();
 
@@ -440,33 +444,39 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
 
       // Check if cancelled or item changed
-      if (!mounted || _currentItem.id != item.id || _currentVideoInitId != initId) {
-        debugPrint('[VaultItemDetail] Video initialization cancelled: item changed');
+      if (!mounted ||
+          _currentItem.id != item.id ||
+          _currentVideoInitId != initId) {
+        debugPrint(
+            '[VaultItemDetail] Video initialization cancelled: item changed');
         return;
       }
-      
-      debugPrint('[VaultItemDetail] Initializing video player from path: $videoFilePath');
-      
+
+      debugPrint(
+          '[VaultItemDetail] Initializing video player from path: $videoFilePath');
+
       // Create controller directly from vault file path (NO temp file rewriting)
       _videoController = VideoPlayerController.file(videoFile);
-      
+
       // Check cancellation again
-      if (!mounted || _currentItem.id != item.id || _currentVideoInitId != initId) {
+      if (!mounted ||
+          _currentItem.id != item.id ||
+          _currentVideoInitId != initId) {
         await _videoController?.dispose();
         _videoController = null;
         return;
       }
-      
+
       // Register with playback manager
       if (_playbackManager != null) {
         _playbackManager!.registerVideo(_videoController!, item.id);
       }
-      
+
       _activeVideoItemId = item.id;
-      
+
       // Set looping
       _videoController!.setLooping(true);
-      
+
       // Initialize controller
       await _videoController!.initialize().timeout(
         const Duration(seconds: 30),
@@ -474,26 +484,31 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
           throw TimeoutException('Video initialization timed out');
         },
       );
-      
+
       // Final cancellation check
-      if (!mounted || _currentItem.id != item.id || _currentVideoInitId != initId) {
+      if (!mounted ||
+          _currentItem.id != item.id ||
+          _currentVideoInitId != initId) {
         await _videoController?.dispose();
         _videoController = null;
         _activeVideoItemId = null;
         return;
       }
-      
+
       final initDuration = DateTime.now().difference(videoInitStart);
-      debugPrint('[VaultItemDetail] ✅ Video initialized in ${initDuration.inMilliseconds}ms');
-      
+      debugPrint(
+          '[VaultItemDetail] ✅ Video initialized in ${initDuration.inMilliseconds}ms');
+
       // Final check before playing
-      if (!mounted || _currentItem.id != item.id || _currentVideoInitId != initId) {
+      if (!mounted ||
+          _currentItem.id != item.id ||
+          _currentVideoInitId != initId) {
         await _videoController?.dispose();
         _videoController = null;
         _activeVideoItemId = null;
         return;
       }
-      
+
       // Auto-play video after initialization (for smooth swiping experience)
       try {
         await _videoController!.play();
@@ -502,7 +517,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         debugPrint('[VaultItemDetail] ⚠️ Error starting video playback: $e');
         // Don't fail initialization if play fails - user can tap to play
       }
-      
+
       if (mounted && _currentItem.id == item.id) {
         setState(() {
           _videoError = null;
@@ -512,27 +527,38 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     } catch (e, stackTrace) {
       debugPrint('[VaultItemDetail] ❌ Video initialization error: $e');
       debugPrint('[VaultItemDetail] Stack trace: $stackTrace');
-      
+
       // Only show error if this is still the active item
-      if (mounted && _currentItem.id == item.id && _currentVideoInitId == initId) {
+      if (mounted &&
+          _currentItem.id == item.id &&
+          _currentVideoInitId == initId) {
         String errorMessage;
         final errorString = e.toString().toLowerCase();
-        
-        if (errorString.contains('av1') || errorString.contains('av01') || 
-            (errorString.contains('codec') && errorString.contains('not supported'))) {
-          errorMessage = 'AV1 video format is not supported on iOS.\n\nPlease download videos in H.264 or H.265 format.';
+
+        if (errorString.contains('av1') ||
+            errorString.contains('av01') ||
+            (errorString.contains('codec') &&
+                errorString.contains('not supported'))) {
+          errorMessage =
+              'AV1 video format is not supported on iOS.\n\nPlease download videos in H.264 or H.265 format.';
         } else if (errorString.contains('timeout')) {
-          errorMessage = 'Video took too long to load. The file may be corrupted.';
+          errorMessage =
+              'Video took too long to load. The file may be corrupted.';
+        } else if (errorString.contains('-12848') ||
+            errorString.contains('cannot open') ||
+            errorString.contains('may be damaged')) {
+          errorMessage =
+              'iOS could not read this video. The file may be incomplete or use a format this device cannot decode.\n\nTry importing the original video again.';
         } else {
           errorMessage = 'Unable to play video: ${e.toString()}';
         }
-        
+
         setState(() {
           _videoError = errorMessage;
           _videoInitializationFailed = true;
         });
       }
-      
+
       await _videoController?.dispose();
       _videoController = null;
       _activeVideoItemId = null;
@@ -547,21 +573,22 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       // Get file path from vault (path-first design)
       final vaultService = Provider.of<VaultService>(context, listen: false);
       final filePath = await vaultService.getDecryptedFilePath(_currentItem.id);
-      
+
       if (filePath == null) {
         throw Exception('Audio file not found in vault');
       }
-      
+
       final sourceFile = File(filePath);
       if (!await sourceFile.exists()) {
         throw Exception('Audio file does not exist: $filePath');
       }
-      
+
       // Create temporary file for audio player
       final tempDir = await getTemporaryDirectory();
       // Use MIME type to determine extension, fallback to item extension, then default to m4a
       String extension = 'm4a'; // Default to m4a for better iOS compatibility
-      if (_currentItem.mimeType != null && _currentItem.mimeType!.startsWith('audio/')) {
+      if (_currentItem.mimeType != null &&
+          _currentItem.mimeType!.startsWith('audio/')) {
         final mimeExt = _currentItem.mimeType!.split('/').last;
         // Map common MIME types to extensions
         if (mimeExt == 'mpeg' || mimeExt == 'mp3') {
@@ -578,8 +605,9 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       } else if (_currentItem.extension != null) {
         extension = _currentItem.extension!;
       }
-      _audioFile = File('${tempDir.path}/audio_${_currentItem.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
-      
+      _audioFile = File(
+          '${tempDir.path}/audio_${_currentItem.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
+
       // Stream copy (no memory loading)
       final writeStart = DateTime.now();
       final sourceStream = sourceFile.openRead();
@@ -592,85 +620,96 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         // Stream is automatically closed when pipe completes
       }
       final writeDuration = DateTime.now().difference(writeStart);
-      debugPrint('[VaultItemDetail] Copying audio temp file took: ${writeDuration.inMilliseconds}ms');
-      
+      debugPrint(
+          '[VaultItemDetail] Copying audio temp file took: ${writeDuration.inMilliseconds}ms');
+
       if (mounted) {
         setState(() {});
       }
-      
+
       final totalAudioInitDuration = DateTime.now().difference(audioInitStart);
-      debugPrint('[VaultItemDetail] Total audio initialization took: ${totalAudioInitDuration.inMilliseconds}ms');
+      debugPrint(
+          '[VaultItemDetail] Total audio initialization took: ${totalAudioInitDuration.inMilliseconds}ms');
     } catch (e) {
       debugPrint('[VaultItemDetail] Error initializing audio file: $e');
     }
   }
-  
+
   /// Check if video is AV1 format (not supported on iOS)
   bool _isAV1Video() {
     // Check MIME type for AV1 indicators
     if (_currentItem.mimeType != null) {
       final mimeType = _currentItem.mimeType!.toLowerCase();
-      if (mimeType.contains('av1') || 
+      if (mimeType.contains('av1') ||
           mimeType.contains('av01') ||
           mimeType.contains('codec=av01') ||
           mimeType.contains('codec=av1')) {
         return true;
       }
     }
-    
+
     // Check filename/extension for AV1 indicators
     final filename = _currentItem.displayName.toLowerCase();
     if (filename.contains('av1') || filename.contains('av01')) {
       return true;
     }
-    
+
     // Note: File data check removed - path-first design doesn't load files into memory
     // AV1 detection will rely on MIME type and filename, or let the player handle it
-    
+
     return false;
   }
-  
+
   /// Check if file header matches known video formats
   bool _isVideoFileHeader(List<int> header) {
     if (header.length < 4) return false;
-    
+
     // MP4/M4V: starts with ftyp box (ftyp at offset 4)
     if (header.length >= 8) {
       final ftyp = String.fromCharCodes(header.sublist(4, 8));
       if (ftyp == 'ftyp') return true;
     }
-    
+
     // WebM/MKV: starts with 1A 45 DF A3
-    if (header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3) {
+    if (header[0] == 0x1A &&
+        header[1] == 0x45 &&
+        header[2] == 0xDF &&
+        header[3] == 0xA3) {
       return true;
     }
-    
+
     // AVI: starts with RIFF...AVI
     if (header.length >= 12) {
       final riff = String.fromCharCodes(header.sublist(0, 4));
       final avi = String.fromCharCodes(header.sublist(8, 12));
       if (riff == 'RIFF' && avi.contains('AVI')) return true;
     }
-    
+
     // MOV/QuickTime: starts with ftyp or moov
     if (header.length >= 8) {
       final ftyp = String.fromCharCodes(header.sublist(4, 8));
       if (ftyp == 'ftyp' || ftyp == 'moov') return true;
     }
-    
+
     // FLV: starts with FLV
     if (header.length >= 3) {
       final flv = String.fromCharCodes(header.sublist(0, 3));
       if (flv == 'FLV') return true;
     }
-    
+
     // WMV/ASF: starts with 30 26 B2 75 8E 66 CF 11
     if (header.length >= 8 &&
-        header[0] == 0x30 && header[1] == 0x26 && header[2] == 0xB2 && header[3] == 0x75 &&
-        header[4] == 0x8E && header[5] == 0x66 && header[6] == 0xCF && header[7] == 0x11) {
+        header[0] == 0x30 &&
+        header[1] == 0x26 &&
+        header[2] == 0xB2 &&
+        header[3] == 0x75 &&
+        header[4] == 0x8E &&
+        header[5] == 0x66 &&
+        header[6] == 0xCF &&
+        header[7] == 0x11) {
       return true;
     }
-    
+
     // 3GP/3G2: starts with ftyp box with 3gp or 3g2 brand
     if (header.length >= 20) {
       final ftyp = String.fromCharCodes(header.sublist(4, 8));
@@ -679,76 +718,48 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         if (brand == '3gp ' || brand == '3g2a' || brand == '3g2b') return true;
       }
     }
-    
+
     // MPEG: starts with 00 00 01 BA or 00 00 01 B3
     if (header.length >= 4 &&
-        header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x01 &&
+        header[0] == 0x00 &&
+        header[1] == 0x00 &&
+        header[2] == 0x01 &&
         (header[3] == 0xBA || header[3] == 0xB3)) {
       return true;
     }
-    
+
     // OGV/OGG: starts with OggS
     if (header.length >= 4) {
       final oggs = String.fromCharCodes(header.sublist(0, 4));
       if (oggs == 'OggS') return true;
     }
-    
-    // If header check fails but file extension suggests video, allow it
-    // The video player will handle format validation
-    return false;
-    if (header.length >= 8 &&
-        header[0] == 0x30 && header[1] == 0x26 && header[2] == 0xB2 && header[3] == 0x75 &&
-        header[4] == 0x8E && header[5] == 0x66 && header[6] == 0xCF && header[7] == 0x11) {
-      return true;
-    }
-    
-    // 3GP/3G2: starts with ftyp box with 3gp or 3g2 brand
-    if (header.length >= 20) {
-      final ftyp = String.fromCharCodes(header.sublist(4, 8));
-      if (ftyp == 'ftyp') {
-        final brand = String.fromCharCodes(header.sublist(8, 12));
-        if (brand == '3gp ' || brand == '3g2a' || brand == '3g2b') return true;
-      }
-    }
-    
-    // MPEG: starts with 00 00 01 BA or 00 00 01 B3
-    if (header.length >= 4 &&
-        header[0] == 0x00 && header[1] == 0x00 && header[2] == 0x01 &&
-        (header[3] == 0xBA || header[3] == 0xB3)) {
-      return true;
-    }
-    
-    // OGV/OGG: starts with OggS
-    if (header.length >= 4) {
-      final oggs = String.fromCharCodes(header.sublist(0, 4));
-      if (oggs == 'OggS') return true;
-    }
-    
+
     // If header check fails but file extension suggests video, allow it
     // The video player will handle format validation
     return false;
   }
-  
+
   Future<void> _initializeDocumentFile() async {
     try {
       // Get file path from vault (path-first design)
       final vaultService = Provider.of<VaultService>(context, listen: false);
       final filePath = await vaultService.getDecryptedFilePath(_currentItem.id);
-      
+
       if (filePath == null) {
         throw Exception('Document file not found in vault');
       }
-      
+
       final sourceFile = File(filePath);
       if (!await sourceFile.exists()) {
         throw Exception('Document file does not exist: $filePath');
       }
-      
+
       // Create temporary file for document viewer (copy from vault)
       final tempDir = await getTemporaryDirectory();
       final extension = _currentItem.extension ?? 'bin';
-      _documentFile = File('${tempDir.path}/doc_${_currentItem.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
-      
+      _documentFile = File(
+          '${tempDir.path}/doc_${_currentItem.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
+
       // Stream copy (no memory loading)
       final sourceStream = sourceFile.openRead();
       final destSink = _documentFile!.openWrite();
@@ -759,7 +770,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         await destSink.close();
         // Stream is automatically closed when pipe completes
       }
-      
+
       if (mounted) {
         setState(() {});
       }
@@ -767,34 +778,43 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       debugPrint('[VaultItemDetail] Error initializing document file: $e');
     }
   }
-  
+
   bool _isPdfFile() {
     final extension = _currentItem.extension?.toLowerCase() ?? '';
-    return extension == 'pdf' || _currentItem.mimeType?.toLowerCase() == 'application/pdf';
+    return extension == 'pdf' ||
+        _currentItem.mimeType?.toLowerCase() == 'application/pdf';
   }
-  
+
   bool _isImageFile() {
     final extension = _currentItem.extension?.toLowerCase() ?? '';
     final mimeType = _currentItem.mimeType?.toLowerCase() ?? '';
-    return extension == 'jpg' || extension == 'jpeg' || extension == 'png' || 
-           extension == 'gif' || extension == 'webp' ||
-           mimeType.startsWith('image/') ||
-           _currentItem.type == VaultItemType.photo;
+    return extension == 'jpg' ||
+        extension == 'jpeg' ||
+        extension == 'png' ||
+        extension == 'gif' ||
+        extension == 'webp' ||
+        mimeType.startsWith('image/') ||
+        _currentItem.type == VaultItemType.photo;
   }
-  
+
   bool _isOfficeDocument() {
     final extension = _currentItem.extension?.toLowerCase() ?? '';
-    return extension == 'doc' || extension == 'docx' || 
-           extension == 'xls' || extension == 'xlsx' ||
-           extension == 'ppt' || extension == 'pptx' ||
-           extension == 'pages' || extension == 'numbers' || extension == 'key';
+    return extension == 'doc' ||
+        extension == 'docx' ||
+        extension == 'xls' ||
+        extension == 'xlsx' ||
+        extension == 'ppt' ||
+        extension == 'pptx' ||
+        extension == 'pages' ||
+        extension == 'numbers' ||
+        extension == 'key';
   }
-  
+
   Future<void> _openDocumentWithExternalApp() async {
     if (_documentFile == null) {
       await _initializeDocumentFile();
     }
-    
+
     if (_documentFile != null) {
       try {
         final result = await OpenFilex.open(_documentFile!.path);
@@ -843,17 +863,18 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       final tempDir = await getTemporaryDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final extension = _currentItem.extension ?? 'bin';
-      _tempFile = File('${tempDir.path}/share_${_currentItem.id}_$timestamp.$extension');
-      
+      _tempFile = File(
+          '${tempDir.path}/share_${_currentItem.id}_$timestamp.$extension');
+
       await _tempFile!.writeAsBytes(fileData);
-      
+
       // Share via system share sheet
       await Share.shareXFiles(
         [XFile(_tempFile!.path)],
         text: 'Shared from Nyx Vault',
         subject: _currentItem.displayName,
       );
-      
+
       // Clean up temp file after a delay
       Future.delayed(const Duration(seconds: 5), () {
         _cleanupTempFile();
@@ -880,17 +901,18 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       final tempDir = await getTemporaryDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final extension = _currentItem.extension ?? 'bin';
-      _tempFile = File('${tempDir.path}/email_${_currentItem.id}_$timestamp.$extension');
-      
+      _tempFile = File(
+          '${tempDir.path}/email_${_currentItem.id}_$timestamp.$extension');
+
       await _tempFile!.writeAsBytes(fileData);
-      
+
       // Share via email (uses system share sheet which includes email)
       await Share.shareXFiles(
         [XFile(_tempFile!.path)],
         text: 'File from Nyx Vault',
         subject: _currentItem.displayName,
       );
-      
+
       Future.delayed(const Duration(seconds: 5), () {
         _cleanupTempFile();
       });
@@ -915,7 +937,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   Future<void> _moveToFolder() async {
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final folders = vaultService.folders;
-    
+
     if (folders.isEmpty) {
       // If no folders exist, ask to create one
       final createFolder = await showDialog<bool>(
@@ -943,7 +965,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
           ],
         ),
       );
-      
+
       if (createFolder == true) {
         // Navigate back to vault to create folder
         Navigator.of(context).pop();
@@ -952,7 +974,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
       return;
     }
-    
+
     // Find which folder this item is currently in (if any)
     String? currentFolderId;
     for (final folder in folders) {
@@ -961,10 +983,10 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         break;
       }
     }
-    
+
     // Show folder selection dialog
     String? selectedFolderId = currentFolderId;
-    
+
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -994,7 +1016,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
                     activeColor: AppTheme.accent,
                   );
                 }
-                
+
                 final folder = folders[index - 1];
                 return RadioListTile<String>(
                   title: Text(folder.name),
@@ -1028,20 +1050,21 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         ),
       ),
     );
-    
+
     if (result != true) return;
-    
+
     try {
       // Remove from current folder if any
       if (currentFolderId != null) {
-        await vaultService.removeItemFromFolder(_currentItem.id, currentFolderId);
+        await vaultService.removeItemFromFolder(
+            _currentItem.id, currentFolderId);
       }
-      
+
       // Add to selected folder (or leave in root if null)
       if (selectedFolderId != null) {
         await vaultService.addItemToFolder(_currentItem.id, selectedFolderId!);
       }
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1066,7 +1089,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
     }
   }
-  
+
   Future<void> _deleteItem() async {
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -1139,6 +1162,15 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
 
   Future<void> _downloadToDevice() async {
     try {
+      // Video never goes through memory. getFileData holds the whole ciphertext
+      // *and* the whole plaintext on the UI isolate (~3x file size), which
+      // jetsam-kills the app on any large clip. Stream-decrypt to a temp file
+      // and hand Photos the path instead.
+      if (_currentItem.type == VaultItemType.video) {
+        await _saveVideoToPhotosLibraryByPath();
+        return;
+      }
+
       // Get file data for export (rare operation)
       final fileData = await _getFileDataForExport();
       if (fileData == null) {
@@ -1155,7 +1187,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
 
       // For photos and videos, save to device gallery (Photos app)
       // For other files (audio, documents, etc.), save to Downloads/Files
-      if (widget.item.type == VaultItemType.photo || widget.item.type == VaultItemType.video) {
+      if (widget.item.type == VaultItemType.photo ||
+          widget.item.type == VaultItemType.video) {
         await _saveToPhotosLibrary(fileData);
       } else {
         await _saveToFiles(fileData);
@@ -1179,25 +1212,27 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     // Try to request permission silently, but don't block or show errors
     // We'll check the actual save result instead
     var status = await Permission.photosAddOnly.status;
-    
+
     // If not granted, try to request it
     if (!status.isGranted && !status.isLimited) {
       status = await Permission.photosAddOnly.request();
     }
-    
+
     // Proceed to save regardless - we'll check the result after
-    
+
     // Permission is granted or limited - proceed to save
 
     try {
       // Create temporary file
       final tempDir = await getTemporaryDirectory();
-      final extension = _currentItem.extension ?? (_currentItem.type == VaultItemType.photo ? 'jpg' : 'mp4');
-      final tempFile = File('${tempDir.path}/save_${_currentItem.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
+      final extension = _currentItem.extension ??
+          (_currentItem.type == VaultItemType.photo ? 'jpg' : 'mp4');
+      final tempFile = File(
+          '${tempDir.path}/save_${_currentItem.id}_${DateTime.now().millisecondsSinceEpoch}.$extension');
       await tempFile.writeAsBytes(fileData);
 
       bool savedToPhotos = false;
-      
+
       // Try to save to Photos library
       try {
         if (widget.item.type == VaultItemType.photo) {
@@ -1223,7 +1258,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         if (savedToPhotos) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${widget.item.type == VaultItemType.photo ? "Photo" : "Video"} saved to Photos library'),
+              content: Text(
+                  '${widget.item.type == VaultItemType.photo ? "Photo" : "Video"} saved to Photos library'),
               backgroundColor: AppTheme.accent,
             ),
           );
@@ -1255,10 +1291,12 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   Future<void> _showConvertToAudioDialog() async {
-    final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
-    final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
+    final subscriptionService =
+        Provider.of<SubscriptionService>(context, listen: false);
+    final hasPremium = subscriptionService.currentTier.isUnlimited ||
+        subscriptionService.isInTrial;
 
     if (!hasPremium) {
       _showPaywall();
@@ -1267,8 +1305,9 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
 
     // Get video file path
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final videoFilePath = await vaultService.getDecryptedFilePath(_currentItem.id);
-    
+    final videoFilePath =
+        await vaultService.getDecryptedFilePath(_currentItem.id);
+
     if (videoFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1280,9 +1319,10 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     }
 
     final videoExtension = _currentItem.extension ?? 'mp4';
-    final recommendedFormat = _converterService.getRecommendedAudioFormat(videoExtension);
+    final recommendedFormat =
+        _converterService.getRecommendedAudioFormat(videoExtension);
     final supportedFormats = _converterService.getSupportedAudioFormats();
-    
+
     // Initialize selected format with recommended format
     _selectedAudioFormat = recommendedFormat;
 
@@ -1308,16 +1348,16 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
               ),
               const SizedBox(height: 16),
               ...supportedFormats.map((format) => RadioListTile<String>(
-                title: Text(format.toUpperCase()),
-                value: format,
-                groupValue: _selectedAudioFormat,
-                onChanged: (value) {
-                  setDialogState(() {
-                    _selectedAudioFormat = value;
-                  });
-                },
-                activeColor: AppTheme.accent,
-              )),
+                    title: Text(format.toUpperCase()),
+                    value: format,
+                    groupValue: _selectedAudioFormat,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedAudioFormat = value;
+                      });
+                    },
+                    activeColor: AppTheme.accent,
+                  )),
             ],
           ),
           actions: [
@@ -1353,8 +1393,9 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   Future<void> _convertVideoToAudio(String audioFormat) async {
     // Get video file path (path-first design)
     final vaultService = Provider.of<VaultService>(context, listen: false);
-    final videoFilePath = await vaultService.getDecryptedFilePath(_currentItem.id);
-    
+    final videoFilePath =
+        await vaultService.getDecryptedFilePath(_currentItem.id);
+
     if (videoFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1364,7 +1405,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       );
       return;
     }
-    
+
     final videoFile = File(videoFilePath);
     if (!await videoFile.exists()) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1421,7 +1462,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       final audioItem = await vaultService.storeFile(
         data: audioData,
         filename: audioFileName,
-        mimeType: 'audio/$actualFormat', // Use actual format, not requested format
+        mimeType:
+            'audio/$actualFormat', // Use actual format, not requested format
         source: VaultItemSource.unknown,
       );
 
@@ -1436,7 +1478,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Converted to ${audioFormat.toUpperCase()} successfully'),
+            content:
+                Text('Converted to ${audioFormat.toUpperCase()} successfully'),
             backgroundColor: AppTheme.accent,
             action: SnackBarAction(
               label: 'View',
@@ -1501,7 +1544,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('File saved to ${Platform.isAndroid ? "Downloads" : "Files"} app'),
+            content: Text(
+                'File saved to ${Platform.isAndroid ? "Downloads" : "Files"} app'),
             backgroundColor: AppTheme.accent,
             action: Platform.isIOS
                 ? SnackBarAction(
@@ -1544,7 +1588,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
               ),
               title: const Text(
                 'Tags',
-                style: TextStyle(color: AppTheme.text, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                    color: AppTheme.text, fontWeight: FontWeight.w700),
               ),
               content: Wrap(
                 spacing: 10,
@@ -1571,7 +1616,9 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
                         color: color,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isSelected ? AppTheme.accent : Colors.white.withOpacity(0.9),
+                          color: isSelected
+                              ? AppTheme.accent
+                              : Colors.white.withOpacity(0.9),
                           width: isSelected ? 4 : 2,
                         ),
                         boxShadow: [
@@ -1583,7 +1630,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
                         ],
                       ),
                       child: isSelected
-                          ? const Icon(Icons.check, color: Colors.white, size: 18)
+                          ? const Icon(Icons.check,
+                              color: Colors.white, size: 18)
                           : null,
                     ),
                   );
@@ -1599,10 +1647,12 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    await vaultService.setItemTagIds(_currentItem.id, selected.toList());
+                    await vaultService.setItemTagIds(
+                        _currentItem.id, selected.toList());
                     if (!mounted) return;
                     setState(() {
-                      final meta = Map<String, dynamic>.from(_currentItem.metadata ?? const {});
+                      final meta = Map<String, dynamic>.from(
+                          _currentItem.metadata ?? const {});
                       if (selected.isEmpty) {
                         meta.remove('tags');
                       } else {
@@ -1650,116 +1700,130 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       },
       child: Scaffold(
         backgroundColor: AppTheme.primary,
-        appBar: (_isVideoFullscreen || _isPhotoFullscreen) ? null : AppBar(
-        title: Text(_currentItem.displayName),
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        actions: [
-          if (_currentItem.type == VaultItemType.video)
-            Consumer<SubscriptionService>(
-              builder: (context, subscriptionService, _) {
-                final hasPremium = subscriptionService.currentTier.isUnlimited || subscriptionService.isInTrial;
-                return IconButton(
-                  icon: _isConverting 
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            value: _conversionProgress > 0 ? _conversionProgress : null,
-                            color: AppTheme.accent,
-                          ),
-                        )
-                      : Icon(
-                          Icons.audiotrack,
-                          color: hasPremium ? null : AppTheme.text.withOpacity(0.4),
+        appBar: (_isVideoFullscreen || _isPhotoFullscreen)
+            ? null
+            : AppBar(
+                title: Text(_currentItem.displayName),
+                backgroundColor: AppTheme.surface,
+                elevation: 0,
+                actions: [
+                  if (_currentItem.type == VaultItemType.video)
+                    Consumer<SubscriptionService>(
+                      builder: (context, subscriptionService, _) {
+                        final hasPremium =
+                            subscriptionService.currentTier.isUnlimited ||
+                                subscriptionService.isInTrial;
+                        return IconButton(
+                          icon: _isConverting
+                              ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    value: _conversionProgress > 0
+                                        ? _conversionProgress
+                                        : null,
+                                    color: AppTheme.accent,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.audiotrack,
+                                  color: hasPremium
+                                      ? null
+                                      : AppTheme.text.withOpacity(0.4),
+                                ),
+                          onPressed: _isConverting
+                              ? null
+                              : (hasPremium
+                                  ? _showConvertToAudioDialog
+                                  : _showPaywall),
+                          tooltip: hasPremium
+                              ? 'Convert to Audio'
+                              : 'Convert to Audio (Premium)',
+                        );
+                      },
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.download),
+                    onPressed: _downloadToDevice,
+                    tooltip: 'Save to Device',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.share),
+                    onPressed: _shareFile,
+                    tooltip: 'Share',
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'tags':
+                          _showTagsDialogForCurrentItem();
+                          break;
+                        case 'move_to_folder':
+                          _moveToFolder();
+                          break;
+                        case 'delete':
+                          _deleteItem();
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'tags',
+                        child: Row(
+                          children: [
+                            Icon(Icons.local_offer_outlined, size: 20),
+                            SizedBox(width: 12),
+                            Text('Tags'),
+                          ],
                         ),
-                  onPressed: _isConverting 
-                      ? null 
-                      : (hasPremium 
-                          ? _showConvertToAudioDialog 
-                          : _showPaywall),
-                  tooltip: hasPremium ? 'Convert to Audio' : 'Convert to Audio (Premium)',
-                );
-              },
-            ),
-          IconButton(
-            icon: const Icon(Icons.download),
-            onPressed: _downloadToDevice,
-            tooltip: 'Save to Device',
-          ),
-          IconButton(
-            icon: const Icon(Icons.share),
-            onPressed: _shareFile,
-            tooltip: 'Share',
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              switch (value) {
-                case 'tags':
-                  _showTagsDialogForCurrentItem();
-                  break;
-                case 'move_to_folder':
-                  _moveToFolder();
-                  break;
-                case 'delete':
-                  _deleteItem();
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'tags',
-                child: Row(
-                  children: [
-                    Icon(Icons.local_offer_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Tags'),
-                  ],
-                ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'move_to_folder',
+                        child: Row(
+                          children: [
+                            Icon(Icons.folder_outlined, size: 20),
+                            SizedBox(width: 12),
+                            Text('Move to Folder'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline,
+                                size: 20, color: AppTheme.warning),
+                            SizedBox(width: 12),
+                            Text('Delete',
+                                style: TextStyle(color: AppTheme.warning)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const PopupMenuItem(
-                value: 'move_to_folder',
-                child: Row(
-                  children: [
-                    Icon(Icons.folder_outlined, size: 20),
-                    SizedBox(width: 12),
-                    Text('Move to Folder'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_outline, size: 20, color: AppTheme.warning),
-                    SizedBox(width: 12),
-                    Text('Delete', style: TextStyle(color: AppTheme.warning)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: widget.allItems != null && widget.allItems!.length > 1
-          ? PageView.builder(
-              controller: _pageController,
-              onPageChanged: _onPageChanged,
-              itemCount: widget.allItems!.length,
-              allowImplicitScrolling: true, // Can be true - only thumbnails are preloaded
-              physics: const PageScrollPhysics(), // Ensure PageView can handle horizontal swipes
-              itemBuilder: (context, index) {
-                final item = widget.allItems![index];
-                final isCurrentPage = index == _currentIndex;
-                
-                // For all pages: show thumbnail/poster immediately (no loading spinner)
-                // For current page: show full content once initialized
-                return _buildPageContent(item, isCurrentPage);
-              },
-            )
-          : _buildPageContent(_currentItem, true),
+        body: widget.allItems != null && widget.allItems!.length > 1
+            ? PageView.builder(
+                controller: _pageController,
+                onPageChanged: _onPageChanged,
+                itemCount: widget.allItems!.length,
+                allowImplicitScrolling:
+                    true, // Can be true - only thumbnails are preloaded
+                physics:
+                    const PageScrollPhysics(), // Ensure PageView can handle horizontal swipes
+                itemBuilder: (context, index) {
+                  final item = widget.allItems![index];
+                  final isCurrentPage = index == _currentIndex;
+
+                  // For all pages: show thumbnail/poster immediately (no loading spinner)
+                  // For current page: show full content once initialized
+                  return _buildPageContent(item, isCurrentPage);
+                },
+              )
+            : _buildPageContent(_currentItem, true),
       ),
     );
   }
@@ -1769,7 +1833,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   Widget _buildPageContent(VaultItem item, bool isActivePage) {
     final vaultService = Provider.of<VaultService>(context, listen: false);
     final thumbnailPath = vaultService.getThumbnailPath(item.id);
-    
+
     // Always show thumbnail first (instant display)
     Widget thumbnailWidget;
     if (thumbnailPath != null) {
@@ -1788,17 +1852,19 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     } else {
       thumbnailWidget = _buildPlaceholder(item);
     }
-    
+
     // For active page, show full content overlay once initialized
     if (isActivePage) {
-      final hasPoster = thumbnailPath != null && File(thumbnailPath).existsSync();
-      final showPosterButton = Platform.isIOS && item.type == VaultItemType.video && !hasPoster;
+      final hasPoster =
+          thumbnailPath != null && File(thumbnailPath).existsSync();
+      final showPosterButton =
+          Platform.isIOS && item.type == VaultItemType.video && !hasPoster;
 
       return Stack(
         children: [
           // Thumbnail/poster background (always visible)
           Positioned.fill(child: thumbnailWidget),
-          
+
           // Full content overlay (when ready)
           // For videos, wrap in a widget that allows horizontal gestures to pass through when not in fullscreen
           item.type == VaultItemType.video && !_isVideoFullscreen
@@ -1821,20 +1887,27 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
                 top: false,
                 child: Center(
                   child: ElevatedButton.icon(
-                    onPressed: _isGeneratingPoster ? null : () => _generatePosterManually(item),
+                    onPressed: _isGeneratingPoster
+                        ? null
+                        : () => _generatePosterManually(item),
                     icon: _isGeneratingPoster
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: AppTheme.primary),
                           )
                         : const Icon(Icons.image_outlined),
-                    label: Text(_isGeneratingPoster ? (_posterStatus ?? 'Generating...') : 'Generate poster'),
+                    label: Text(_isGeneratingPoster
+                        ? (_posterStatus ?? 'Generating...')
+                        : 'Generate poster'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.black.withOpacity(0.65),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -1847,33 +1920,34 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       return thumbnailWidget;
     }
   }
-  
+
   /// Build full content for active page (overlay on thumbnail)
   Widget _buildFullContent(VaultItem item) {
     // For videos: show player when controller is ready
     if (item.type == VaultItemType.video) {
       // Check if controller is ready and matches current item
-      final isControllerReady = _videoController != null && 
-          _videoController!.value.isInitialized && 
+      final isControllerReady = _videoController != null &&
+          _videoController!.value.isInitialized &&
           _activeVideoItemId == item.id;
-      
+
       if (isControllerReady) {
         // Ensure video is playing (might have been paused during swipe or initialization)
         // Use microtask to avoid setState during build
         Future.microtask(() {
-          if (mounted && 
-              _videoController != null && 
+          if (mounted &&
+              _videoController != null &&
               _videoController!.value.isInitialized &&
               _activeVideoItemId == item.id &&
               !_videoController!.value.isPlaying &&
               !_videoController!.value.isCompleted) {
             // Auto-play if not already playing
             _videoController!.play().catchError((e) {
-              debugPrint('[VaultItemDetail] Error auto-playing video after swipe: $e');
+              debugPrint(
+                  '[VaultItemDetail] Error auto-playing video after swipe: $e');
             });
           }
         });
-        
+
         return VideoPlayerWidget(
           controller: _videoController!,
           mediaId: item.id,
@@ -1926,7 +2000,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         return const SizedBox.shrink();
       }
     }
-    
+
     // For photos: show Image.file with ResizeImage. Uses the pre-loaded
     // _photoFile (decrypted to temp on initialization) when present.
     if (item.type == VaultItemType.photo) {
@@ -1959,7 +2033,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
       return _buildPlaceholder(item);
     }
-    
+
     // For documents: show viewer
     if (item.type == VaultItemType.document) {
       if (_documentFile != null) {
@@ -1967,15 +2041,15 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       }
       return _buildPlaceholder(item);
     }
-    
+
     return _buildPlaceholder(item);
   }
-  
+
   /// Build placeholder widget
   Widget _buildPlaceholder(VaultItem item) {
     IconData icon;
     Color color;
-    
+
     switch (item.type) {
       case VaultItemType.photo:
         icon = Icons.image;
@@ -1997,7 +2071,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         icon = Icons.insert_drive_file;
         color = Colors.grey;
     }
-    
+
     return Container(
       color: AppTheme.primary,
       child: Center(
@@ -2005,7 +2079,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   /// Build video error widget
   Widget _buildVideoError() {
     return Center(
@@ -2055,12 +2129,12 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   Widget _buildContent() {
     // Legacy method - redirect to new path-based method
     return _buildPageContent(_currentItem, true);
   }
-  
+
   Widget _buildVideoInfo() {
     return Container(
       height: 200,
@@ -2087,7 +2161,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
             _buildInfoRow('Date Added', _formatDate(_currentItem.dateAdded)),
             if (_currentItem.sourceSite != null)
               _buildInfoRow('Source', _currentItem.sourceSite!),
-            if (_videoController != null && _videoController!.value.isInitialized)
+            if (_videoController != null &&
+                _videoController!.value.isInitialized)
               _buildInfoRow(
                 'Duration',
                 _formatDuration(_videoController!.value.duration),
@@ -2097,7 +2172,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   Widget _buildAudioInfo() {
     return Container(
       height: 200,
@@ -2129,7 +2204,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   Widget _buildPhotoInfo() {
     return Container(
       height: 200,
@@ -2161,7 +2236,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   Widget _buildDocumentInfo() {
     return Container(
       height: 200,
@@ -2193,7 +2268,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
       ),
     );
   }
-  
+
   IconData _getDocumentIcon() {
     final extension = widget.item.extension?.toLowerCase() ?? '';
     switch (extension) {
@@ -2216,12 +2291,12 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         return Icons.insert_drive_file;
     }
   }
-  
+
   String _formatDuration(Duration duration) {
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-    
+
     if (hours > 0) {
       return '${hours}h ${minutes}m ${seconds}s';
     } else if (minutes > 0) {
@@ -2264,7 +2339,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 

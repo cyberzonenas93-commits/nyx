@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
@@ -10,11 +11,12 @@ import 'package:mime/mime.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
-import 'package:photo_manager/photo_manager.dart';
 import 'package:shelf_router/shelf_router.dart';
 import '../models/vault_item.dart';
 import 'vault_service.dart';
 import 'auth_service.dart';
+
+class _UploadTooLargeException implements Exception {}
 
 /// Minimal WiFi Transfer: HTTP server so a computer on the same WiFi can
 /// browse vault items, upload files, and download files.
@@ -26,6 +28,7 @@ class WiFiTransferService extends ChangeNotifier {
   MDNSServer? _mdnsServer;
   bool _usedNativeMdns = false;
   String? _serverUrl;
+  String? _transferToken;
   bool _isRunning = false;
   bool _mdnsDiscoverable = false;
   int _port = 8080;
@@ -38,22 +41,63 @@ class WiFiTransferService extends ChangeNotifier {
   bool get isRunning => _isRunning;
   bool get isReceiving => _isReceiving;
   bool get showUploadComplete => _showUploadComplete;
-  String? get serverUrl => _serverUrl;
+  String? get serverUrl {
+    final baseUrl = _serverUrl;
+    final token = _transferToken;
+    if (baseUrl == null || token == null) return baseUrl;
+    return Uri.parse(baseUrl)
+        .replace(queryParameters: {'token': token}).toString();
+  }
+
   int get port => _port;
   bool get isDiscoverableOnNetwork => _mdnsDiscoverable;
   bool get isReachableFromNetwork =>
       _serverUrl != null &&
       !_serverUrl!.contains('localhost') &&
       !_serverUrl!.contains('127.0.0.1');
+
   /// True when likely running on Android emulator (10.0.2.x). Use adb reverse to reach from host.
   bool get isLikelyEmulator =>
       Platform.isAndroid &&
       _serverUrl != null &&
-      (_serverUrl!.contains('10.0.2.') || _serverUrl!.startsWith('http://10.0.2.'));
+      (_serverUrl!.contains('10.0.2.') ||
+          _serverUrl!.startsWith('http://10.0.2.'));
 
   WiFiTransferService(this._vaultService, this._authService);
 
   bool _isVaultUnlocked() => _authService.isUnlocked;
+
+  String _generateTransferToken() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(24, (_) => random.nextInt(256));
+    return base64UrlEncode(bytes).replaceAll('=', '');
+  }
+
+  bool _hasValidTransferToken(Request request) {
+    final expected = _transferToken;
+    if (expected == null || expected.isEmpty) return false;
+    final supplied = request.url.queryParameters['token'] ??
+        request.headers['x-nyx-transfer-token'];
+    return supplied == expected;
+  }
+
+  Response? _guardTransferRequest(Request request) {
+    if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
+    if (!_hasValidTransferToken(request)) {
+      return _cors(
+        Response.forbidden(
+          'Transfer session expired. Restart WiFi Transfer in Nyx.',
+        ),
+      );
+    }
+    return null;
+  }
+
+  String _authorizedPath(String route) {
+    final token = _transferToken;
+    if (token == null || token.isEmpty) return route;
+    return Uri(path: route, queryParameters: {'token': token}).toString();
+  }
 
   Future<String> _getLocalIP() async {
     // On Android/iOS prefer WiFi IP from network_info_plus (reliable for wlan0/WiFi)
@@ -75,9 +119,15 @@ class WiFiTransferService extends ChangeNotifier {
       String? fallbackIp;
       for (final interface in interfaces) {
         final name = interface.name.toLowerCase();
-        if (name.startsWith('pdp_') || name == 'awdl0' || name.startsWith('utun')) continue;
+        if (name.startsWith('pdp_') ||
+            name == 'awdl0' ||
+            name.startsWith('utun')) {
+          continue;
+        }
         for (final addr in interface.addresses) {
-          if (addr.type != InternetAddressType.IPv4 || addr.isLoopback) continue;
+          if (addr.type != InternetAddressType.IPv4 || addr.isLoopback) {
+            continue;
+          }
           final ip = addr.address;
           // en0 = macOS/iOS WiFi, wlan0 = Android WiFi
           if (name == 'en0' || name == 'wlan0') {
@@ -95,7 +145,9 @@ class WiFiTransferService extends ChangeNotifier {
     try {
       final info = NetworkInfo();
       final wifiIP = await info.getWifiIP();
-      if (wifiIP != null && wifiIP.isNotEmpty && wifiIP != '127.0.0.1') return wifiIP;
+      if (wifiIP != null && wifiIP.isNotEmpty && wifiIP != '127.0.0.1') {
+        return wifiIP;
+      }
     } catch (e) {
       debugPrint('[WiFiTransfer] network_info_plus: $e');
     }
@@ -105,34 +157,39 @@ class WiFiTransferService extends ChangeNotifier {
   Response _cors(Response res) {
     return res.change(headers: {
       ...res.headers,
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
     });
   }
 
   Middleware _corsOptionsMiddleware() {
     return (Handler handler) {
       return (Request request) async {
-        if (request.method.toUpperCase() == 'OPTIONS') return _cors(Response.ok(''));
+        if (request.method.toUpperCase() == 'OPTIONS') {
+          return _cors(Response(405, body: 'CORS disabled'));
+        }
         return handler(request);
       };
     };
   }
 
   Future<Response> _handleIndex(Request request) async {
+    final guard = _guardTransferRequest(request);
+    if (guard != null) return guard;
     final html = _buildIndexHtml();
-    return _cors(Response.ok(html, headers: {'Content-Type': 'text/html; charset=utf-8'}));
+    return _cors(Response.ok(html,
+        headers: {'Content-Type': 'text/html; charset=utf-8'}));
   }
 
   String _buildIndexHtml() {
     final vs = _vaultService;
     final rootItems = vs.getRootItems();
     final folders = vs.folders;
-    final totalItems = rootItems.length + folders.fold<int>(0, (s, f) => s + vs.getFolderItems(f.id).length);
+    final totalItems = rootItems.length +
+        folders.fold<int>(0, (s, f) => s + vs.getFolderItems(f.id).length);
     final downloadAllHtml = totalItems == 0
         ? ''
-        : '<p><a href="/download-all" class="btn">Download all as ZIP</a></p>';
+        : '<p><a href="${_authorizedPath('/download-all')}" class="btn">Download all as ZIP</a></p>';
 
     final sections = <String>[];
     // Files (root)
@@ -183,6 +240,7 @@ input[type=file],button{padding:0.5rem 1rem;margin:0.5rem 0;} button{background:
 </div>
 <script>
 (function(){
+  var transferToken = ${jsonEncode(_transferToken ?? '')};
   var form = document.getElementById('uploadForm');
   var progress = document.getElementById('uploadProgress');
   var progressFill = document.getElementById('progressFill');
@@ -227,7 +285,7 @@ input[type=file],button{padding:0.5rem 1rem;margin:0.5rem 0;} button{background:
       err.textContent = 'Network error';
       err.style.display = 'block';
     };
-    xhr.open('POST', '/upload');
+    xhr.open('POST', '/upload?token=' + encodeURIComponent(transferToken));
     xhr.send(fd);
     return false;
   };
@@ -248,11 +306,12 @@ ${sections.join('\n')}
     if (items.isEmpty) return '';
     final rows = items.map((item) {
       final size = _formatBytes(item.sizeBytes);
-      final isMedia = item.type == VaultItemType.photo || item.type == VaultItemType.video;
+      final isMedia =
+          item.type == VaultItemType.photo || item.type == VaultItemType.video;
       final thumbCell = isMedia
-          ? '<td class="thumb"><img src="/thumbnail/${item.id}" alt="" class="thumb-img" onerror="this.classList.add(\'thumb-fail\'); this.style.background=\'#2a2a30\'; this.style.minWidth=\'48px\'; this.style.minHeight=\'48px\'"></td>'
+          ? '<td class="thumb"><img src="${_authorizedPath('/thumbnail/${item.id}')}" alt="" class="thumb-img" onerror="this.classList.add(\'thumb-fail\'); this.style.background=\'#2a2a30\'; this.style.minWidth=\'48px\'; this.style.minHeight=\'48px\'"></td>'
           : '<td class="thumb"><span class="thumb-placeholder">&#128196;</span></td>';
-      return '<tr>$thumbCell<td><a href="/download/${item.id}" download>${_escape(item.displayName)}</a></td><td>$size</td></tr>';
+      return '<tr>$thumbCell<td><a href="${_authorizedPath('/download/${item.id}')}" download>${_escape(item.displayName)}</a></td><td>$size</td></tr>';
     }).join();
     return '<h3>$sectionTitle</h3><table><thead><tr><th></th><th>File</th><th>Size</th></tr></thead><tbody>$rows</tbody></table>';
   }
@@ -272,13 +331,16 @@ ${sections.join('\n')}
   }
 
   Future<Response> _handleList(Request request) async {
-    if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
-    final items = _vaultService.items.map((i) => {
-      'id': i.id,
-      'name': i.displayName,
-      'size': i.sizeBytes,
-      'type': i.type.toString().split('.').last,
-    }).toList();
+    final guard = _guardTransferRequest(request);
+    if (guard != null) return guard;
+    final items = _vaultService.items
+        .map((i) => {
+              'id': i.id,
+              'name': i.displayName,
+              'size': i.sizeBytes,
+              'type': i.type.toString().split('.').last,
+            })
+        .toList();
     return _cors(Response.ok(
       jsonEncode(items),
       headers: {'Content-Type': 'application/json'},
@@ -286,9 +348,11 @@ ${sections.join('\n')}
   }
 
   Future<Response> _handleUpload(Request request) async {
-    if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
+    final guard = _guardTransferRequest(request);
+    if (guard != null) return guard;
     final contentType = request.headers['content-type'];
-    if (contentType == null || !contentType.toLowerCase().contains('multipart')) {
+    if (contentType == null ||
+        !contentType.toLowerCase().contains('multipart')) {
       return _cors(Response.badRequest(body: 'Expected multipart/form-data'));
     }
     HeaderValue headerValue;
@@ -298,84 +362,138 @@ ${sections.join('\n')}
       return _cors(Response.badRequest(body: 'Invalid Content-Type'));
     }
     var boundary = headerValue.parameters['boundary']?.trim();
-    if (boundary == null || boundary.isEmpty) return _cors(Response.badRequest(body: 'Missing boundary'));
-    if ((boundary.startsWith('"') && boundary.endsWith('"')) || (boundary.startsWith("'") && boundary.endsWith("'"))) {
+    if (boundary == null || boundary.isEmpty) {
+      return _cors(Response.badRequest(body: 'Missing boundary'));
+    }
+    if ((boundary.startsWith('"') && boundary.endsWith('"')) ||
+        (boundary.startsWith("'") && boundary.endsWith("'"))) {
       boundary = boundary.substring(1, boundary.length - 1);
     }
     _isReceiving = true;
+    _showUploadComplete = false;
+    _uploadCompleteTimer?.cancel();
     notifyListeners();
     final transformer = MimeMultipartTransformer(boundary);
+    Directory? tempDir;
+    var uploadSucceeded = false;
     try {
-      final bytes = await request.read().expand((x) => x).toList();
-      if (bytes.length > _maxUploadBytes) {
-        return _cors(Response(413, body: 'File too large'));
-      }
+      tempDir = await Directory.systemTemp.createTemp('nyx_wifi_upload_');
       int saved = 0;
-      await for (final part in Stream.value(bytes).transform(transformer)) {
+      int uploadedBytes = 0;
+
+      await for (final part in request.read().transform(transformer)) {
         final disposition = part.headers['content-disposition'] ?? '';
-        final match = RegExp(r'filename="?([^"\r\n]+)"?').firstMatch(disposition);
-        if (match == null) continue;
-        final filename = (match.group(1) ?? 'upload').replaceAll(RegExp(r'[\r\n]'), '').split('/').last.split(r'\').last;
-        if (filename.trim().isEmpty) continue;
-        final data = await part.fold(<int>[], (a, b) => [...a, ...b]);
-        final u8 = Uint8List.fromList(data);
-        final item = await _vaultService.storeFile(
-          data: u8,
-          filename: filename,
-          source: VaultItemSource.import,
-        );
-        saved++;
-        // Save photos and videos to device gallery so they appear in Photos app
-        if (item.type == VaultItemType.photo || item.type == VaultItemType.video) {
-          _saveUploadToGallery(item);
+        final filename = _filenameFromMultipartDisposition(disposition);
+        if (filename == null || filename.isEmpty) {
+          await part.drain<void>();
+          continue;
         }
+
+        final tempFile = File(path.join(
+          tempDir.path,
+          '${DateTime.now().microsecondsSinceEpoch}_$filename',
+        ));
+        var fileBytes = 0;
+        final sink = tempFile.openWrite();
+        try {
+          await for (final chunk in part) {
+            uploadedBytes += chunk.length;
+            fileBytes += chunk.length;
+            if (uploadedBytes > _maxUploadBytes) {
+              throw _UploadTooLargeException();
+            }
+            sink.add(chunk);
+          }
+          await sink.flush();
+        } finally {
+          await sink.close();
+        }
+
+        final mimeType =
+            part.headers['content-type'] ?? lookupMimeType(filename);
+        final lowerFilename = filename.toLowerCase();
+        final isVideo =
+            (mimeType?.toLowerCase().startsWith('video/') ?? false) ||
+                lowerFilename.endsWith('.mp4') ||
+                lowerFilename.endsWith('.mov') ||
+                lowerFilename.endsWith('.m4v') ||
+                lowerFilename.endsWith('.avi') ||
+                lowerFilename.endsWith('.mkv') ||
+                lowerFilename.endsWith('.webm');
+
+        final storedItem = await _vaultService.storeFileFromPath(
+          sourceFilePath: tempFile.path,
+          filename: filename,
+          mimeType: mimeType,
+          source: VaultItemSource.import,
+          queueThumbnailGeneration: !isVideo,
+          deduplicate: !isVideo,
+        );
+        if (isVideo) {
+          unawaited(
+            Future<void>.delayed(const Duration(seconds: 2), () async {
+              try {
+                await _vaultService.generateThumbnailForItem(storedItem.id);
+              } catch (e) {
+                debugPrint(
+                  '[WiFiTransfer] Deferred video thumbnail failed for $filename: $e',
+                );
+              }
+            }),
+          );
+        }
+        saved++;
+        debugPrint(
+          '[WiFiTransfer] Uploaded $filename (${_formatBytes(fileBytes)})',
+        );
       }
-      if (saved == 0) return _cors(Response.badRequest(body: 'No file in request'));
+      if (saved == 0) {
+        return _cors(Response.badRequest(body: 'No file in request'));
+      }
+      uploadSucceeded = true;
       return _cors(Response.ok('Uploaded $saved file(s)'));
+    } on _UploadTooLargeException {
+      return _cors(Response(413, body: 'File too large'));
     } catch (e) {
       debugPrint('[WiFiTransfer] Upload error: $e');
       return _cors(Response(500, body: e.toString()));
     } finally {
+      try {
+        await tempDir?.delete(recursive: true);
+      } catch (e) {
+        debugPrint('[WiFiTransfer] Temp upload cleanup failed: $e');
+      }
       _isReceiving = false;
       _uploadCompleteTimer?.cancel();
-      _showUploadComplete = true;
-      _uploadCompleteTimer = Timer(const Duration(seconds: 3), () {
-        _showUploadComplete = false;
-        notifyListeners();
-      });
+      _showUploadComplete = uploadSucceeded;
+      if (uploadSucceeded) {
+        _uploadCompleteTimer = Timer(const Duration(seconds: 3), () {
+          _showUploadComplete = false;
+          notifyListeners();
+        });
+      }
       notifyListeners();
     }
   }
 
-  /// Saves an uploaded photo or video to the device gallery (Photos app).
-  /// Called asynchronously after storeFile; failures are logged only.
-  Future<void> _saveUploadToGallery(VaultItem item) async {
-    if (item.type != VaultItemType.photo && item.type != VaultItemType.video) return;
-    final filePath = await _vaultService.getDecryptedFilePath(item.id);
-    if (filePath == null) return;
-    final file = File(filePath);
-    if (!await file.exists()) return;
-    try {
-      if (item.type == VaultItemType.photo) {
-        final result = await PhotoManager.editor.saveImageWithPath(
-          filePath,
-          title: item.displayName,
-        );
-        if (result == null) debugPrint('[WiFiTransfer] Gallery save failed for photo: ${item.id}');
-      } else {
-        final result = await PhotoManager.editor.saveVideo(
-          file,
-          title: item.displayName,
-        );
-        if (result == null) debugPrint('[WiFiTransfer] Gallery save failed for video: ${item.id}');
-      }
-    } catch (e) {
-      debugPrint('[WiFiTransfer] Error saving to gallery: $e');
-    }
+  String? _filenameFromMultipartDisposition(String disposition) {
+    final match = RegExp(
+      r'filename="?([^"\r\n;]+)"?',
+      caseSensitive: false,
+    ).firstMatch(disposition);
+    final rawFilename = match?.group(1);
+    if (rawFilename == null) return null;
+    final normalized = rawFilename
+        .replaceAll(RegExp(r'[\r\n]'), '')
+        .replaceAll(r'\', '/')
+        .trim();
+    if (normalized.isEmpty) return null;
+    return normalized.split('/').last.trim();
   }
 
   Future<Response> _handleThumbnail(Request request, String itemId) async {
-    if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
+    final guard = _guardTransferRequest(request);
+    if (guard != null) return guard;
     final thumbPath = _vaultService.getThumbnailPath(itemId);
     if (thumbPath == null) return _cors(Response.notFound('No thumbnail'));
     final file = File(thumbPath);
@@ -391,14 +509,18 @@ ${sections.join('\n')}
   }
 
   Future<Response> _handleDownload(Request request, String itemId) async {
-    if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
+    final guard = _guardTransferRequest(request);
+    if (guard != null) return guard;
     final path = await _vaultService.getDecryptedFilePath(itemId);
     if (path == null) return _cors(Response.notFound('Not found'));
     final file = File(path);
     if (!await file.exists()) return _cors(Response.notFound('Not found'));
     VaultItem? item;
     for (final i in _vaultService.items) {
-      if (i.id == itemId) { item = i; break; }
+      if (i.id == itemId) {
+        item = i;
+        break;
+      }
     }
     final name = item?.originalFilename ?? itemId;
     final stream = file.openRead();
@@ -411,10 +533,12 @@ ${sections.join('\n')}
     ));
   }
 
-  String _escapeHeader(String s) => s.replaceAll('"', '\\"').replaceAll('\r', '').replaceAll('\n', '');
+  String _escapeHeader(String s) =>
+      s.replaceAll('"', '\\"').replaceAll('\r', '').replaceAll('\n', '');
 
   Future<Response> _handleDownloadAll(Request request) async {
-    if (!_isVaultUnlocked()) return _cors(Response.forbidden('Vault locked'));
+    final guard = _guardTransferRequest(request);
+    if (guard != null) return guard;
     final items = _vaultService.items;
     if (items.isEmpty) {
       return _cors(Response.ok(
@@ -475,6 +599,7 @@ ${sections.join('\n')}
     if (_isRunning) return true;
     // No vault check here: WiFi transfer is only reachable after unlock, so vault is always unlocked
     try {
+      _transferToken ??= _generateTransferToken();
       final ip = await _getLocalIP();
       final bindAddress = (ip == 'localhost' || ip == '127.0.0.1')
           ? InternetAddress.anyIPv4
@@ -482,12 +607,14 @@ ${sections.join('\n')}
       final router = Router();
       router.get('/', _handleIndex);
       router.get('/api/items', _handleList);
-      router.get('/thumbnail/<itemId>', (Request req, String itemId) => _handleThumbnail(req, itemId));
+      router.get('/thumbnail/<itemId>',
+          (Request req, String itemId) => _handleThumbnail(req, itemId));
       router.post('/upload', _handleUpload);
-      router.get('/download/<itemId>', (Request req, String itemId) => _handleDownload(req, itemId));
+      router.get('/download/<itemId>',
+          (Request req, String itemId) => _handleDownload(req, itemId));
       router.get('/download-all', _handleDownloadAll);
 
-      final handler = Pipeline()
+      final handler = const Pipeline()
           .addMiddleware(_corsOptionsMiddleware())
           .addMiddleware(_logMiddleware())
           .addHandler(router.call);
@@ -511,7 +638,7 @@ ${sections.join('\n')}
               type: '_http._tcp',
               port: _port,
               hostAddresses: Platform.isAndroid ? [ip] : null,
-              attributes: {'path': '/'},
+              attributes: {'path': '/?token=${_transferToken ?? ''}'},
             );
             await MdnsResponder().publishService(service);
             _usedNativeMdns = true;
@@ -529,7 +656,7 @@ ${sections.join('\n')}
               service: '_http._tcp',
               port: _port,
               ips: [InternetAddress(ip)],
-              txt: ['path=/'],
+              txt: ['path=/?token=${_transferToken ?? ''}'],
             );
             _mdnsServer = MDNSServer(MDNSServerConfig(zone: mdnsService));
             await _mdnsServer!.start();
@@ -558,7 +685,15 @@ ${sections.join('\n')}
   Middleware _logMiddleware() {
     return (Handler handler) {
       return (Request request) async {
-        debugPrint('[WiFiTransfer] ${request.method} ${request.url}');
+        final logUrl = request.url.queryParameters.containsKey('token')
+            ? request.url.replace(
+                queryParameters: {
+                  ...request.url.queryParameters,
+                  'token': '<redacted>',
+                },
+              )
+            : request.url;
+        debugPrint('[WiFiTransfer] ${request.method} $logUrl');
         return handler(request);
       };
     };
@@ -590,6 +725,7 @@ ${sections.join('\n')}
     }
     _server = null;
     _serverUrl = null;
+    _transferToken = null;
     _isRunning = false;
     notifyListeners();
   }

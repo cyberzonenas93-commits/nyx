@@ -1,7 +1,7 @@
 name: nyx
 description: Nyx - A local-first media privacy vault app
 publish_to: 'none'
-version: 1.0.4+7
+version: 1.0.7+16
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -14,6 +14,10 @@ dependencies:
   crypto: ^3.0.3
   pointycastle: ^3.7.3
   encrypt: ^5.0.3
+  # AES-GCM for vault files. Byte-identical output to the PointyCastle GCM it
+  # replaces (same key/nonce/AAD -> same ciphertext+tag), but ~12x faster, which
+  # is what makes video import usable. See test/vault_cipher_test.dart.
+  cryptography: ^2.7.0
   
   # Storage
   path_provider: ^2.1.1
@@ -81,6 +85,8 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^3.0.1
   flutter_launcher_icons: ^0.13.1

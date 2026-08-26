@@ -19,11 +19,11 @@ class DownloadsPage extends StatelessWidget {
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
           final navigator = Navigator.of(context);
-          
+
           // Try to pop once first
           if (navigator.canPop()) {
             navigator.pop();
-            
+
             // After popping, check if we're on the browser
             // Use a microtask to check after the pop completes
             Future.microtask(() {
@@ -56,64 +56,67 @@ class DownloadsPage extends StatelessWidget {
           backgroundColor: AppTheme.surface,
           elevation: 0,
           actions: [
-          Consumer<DownloadManagerService>(
-            builder: (context, downloadManager, _) {
-              if (downloadManager.tasks.isEmpty) return const SizedBox.shrink();
-              return IconButton(
-                icon: const Icon(Icons.delete_sweep),
-                tooltip: 'Delete All',
-                onPressed: () => _deleteAllDownloads(context, downloadManager),
-              );
-            },
-          ),
-        ],
-      ),
-      body: Consumer<DownloadManagerService>(
-        builder: (context, downloadManager, _) {
-          final allTasks = downloadManager.tasks;
-          
-          if (allTasks.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.download_outlined,
-                    size: 64,
-                    color: AppTheme.text.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No downloads',
-                    style: TextStyle(
-                      color: AppTheme.text.withOpacity(0.7),
-                      fontSize: 16,
+            Consumer<DownloadManagerService>(
+              builder: (context, downloadManager, _) {
+                if (downloadManager.tasks.isEmpty)
+                  return const SizedBox.shrink();
+                return IconButton(
+                  icon: const Icon(Icons.delete_sweep),
+                  tooltip: 'Delete All',
+                  onPressed: () =>
+                      _deleteAllDownloads(context, downloadManager),
+                );
+              },
+            ),
+          ],
+        ),
+        body: Consumer<DownloadManagerService>(
+          builder: (context, downloadManager, _) {
+            final allTasks = downloadManager.tasks;
+
+            if (allTasks.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.download_outlined,
+                      size: 64,
+                      color: AppTheme.text.withOpacity(0.3),
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No downloads',
+                      style: TextStyle(
+                        color: AppTheme.text.withOpacity(0.7),
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: allTasks.length,
+              itemBuilder: (context, index) {
+                final task = allTasks[index];
+                return _buildDownloadItem(context, task, downloadManager);
+              },
             );
-          }
-          
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: allTasks.length,
-            itemBuilder: (context, index) {
-              final task = allTasks[index];
-              return _buildDownloadItem(context, task, downloadManager);
-            },
-          );
-        },
-      ),
+          },
+        ),
       ),
     );
   }
-  
-  Widget _buildDownloadItem(BuildContext context, DownloadTask task, DownloadManagerService downloadManager) {
+
+  Widget _buildDownloadItem(BuildContext context, DownloadTask task,
+      DownloadManagerService downloadManager) {
     IconData statusIcon;
     Color statusColor;
     String statusText;
-    
+
     switch (task.status) {
       case DownloadStatus.downloading:
         statusIcon = Icons.download;
@@ -146,7 +149,7 @@ class DownloadsPage extends StatelessWidget {
         statusText = 'Cancelled';
         break;
     }
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       color: AppTheme.surfaceVariant,
@@ -154,13 +157,15 @@ class DownloadsPage extends StatelessWidget {
         leading: Icon(statusIcon, color: statusColor, size: 24),
         title: Text(
           task.filename,
-          style: const TextStyle(color: AppTheme.text, fontWeight: FontWeight.w500),
+          style: const TextStyle(
+              color: AppTheme.text, fontWeight: FontWeight.w500),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         onTap: () {
           // If completed and has vault item, open it
-          if (task.status == DownloadStatus.completed && task.vaultItemId != null) {
+          if (task.status == DownloadStatus.completed &&
+              task.vaultItemId != null) {
             _navigateToVaultItem(context, task);
           }
         },
@@ -184,7 +189,8 @@ class DownloadsPage extends StatelessWidget {
                     fontSize: 12,
                   ),
                 ),
-                if (task.status == DownloadStatus.downloading && task.totalBytes != null)
+                if (task.status == DownloadStatus.downloading &&
+                    task.totalBytes != null)
                   Text(
                     ' • ${_formatBytes(task.bytesDownloaded)} / ${_formatBytes(task.totalBytes!)}',
                     style: TextStyle(
@@ -240,7 +246,7 @@ class DownloadsPage extends StatelessWidget {
           },
           itemBuilder: (context) {
             final items = <PopupMenuEntry<String>>[];
-            
+
             if (task.status == DownloadStatus.downloading) {
               items.add(const PopupMenuItem(
                 value: 'pause',
@@ -252,19 +258,22 @@ class DownloadsPage extends StatelessWidget {
                   ],
                 ),
               ));
-            } else if (task.status == DownloadStatus.paused) {
-              items.add(const PopupMenuItem(
+            } else if (task.status == DownloadStatus.paused ||
+                task.status == DownloadStatus.pending) {
+              items.add(PopupMenuItem(
                 value: 'resume',
                 child: Row(
                   children: [
-                    Icon(Icons.play_arrow, size: 20),
-                    SizedBox(width: 8),
-                    Text('Resume'),
+                    const Icon(Icons.play_arrow, size: 20),
+                    const SizedBox(width: 8),
+                    Text(task.status == DownloadStatus.pending
+                        ? 'Start'
+                        : 'Resume'),
                   ],
                 ),
               ));
             }
-            
+
             if (task.status == DownloadStatus.failed) {
               items.add(const PopupMenuItem(
                 value: 'retry',
@@ -277,7 +286,7 @@ class DownloadsPage extends StatelessWidget {
                 ),
               ));
             }
-            
+
             if (task.status != DownloadStatus.completed) {
               items.add(const PopupMenuItem(
                 value: 'cancel',
@@ -290,9 +299,10 @@ class DownloadsPage extends StatelessWidget {
                 ),
               ));
             }
-            
+
             // Add "View in Vault" for completed downloads
-            if (task.status == DownloadStatus.completed && task.vaultItemId != null) {
+            if (task.status == DownloadStatus.completed &&
+                task.vaultItemId != null) {
               items.add(const PopupMenuItem(
                 value: 'view_in_vault',
                 child: Row(
@@ -304,7 +314,7 @@ class DownloadsPage extends StatelessWidget {
                 ),
               ));
             }
-            
+
             // Add delete option for all downloads
             items.add(const PopupMenuItem(
               value: 'delete',
@@ -316,35 +326,36 @@ class DownloadsPage extends StatelessWidget {
                 ],
               ),
             ));
-            
+
             return items;
           },
         ),
       ),
     );
   }
-  
+
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
-  
+
   void _navigateToVaultItem(BuildContext context, DownloadTask task) {
     if (task.vaultItemId == null) return;
-    
+
     try {
       final vaultService = Provider.of<VaultService>(context, listen: false);
       final vaultItem = vaultService.items.firstWhere(
         (item) => item.id == task.vaultItemId,
       );
-      
+
       // Navigate to vault home first, then to item detail
       // Check if VaultHomePage is already in the stack
       final navigator = Navigator.of(context);
       bool vaultPageExists = false;
-      
+
       navigator.popUntil((route) {
         if (route.settings.name == '/vault') {
           vaultPageExists = true;
@@ -355,7 +366,7 @@ class DownloadsPage extends StatelessWidget {
         }
         return false;
       });
-      
+
       // If vault page doesn't exist, push it
       if (!vaultPageExists) {
         navigator.push(
@@ -365,7 +376,7 @@ class DownloadsPage extends StatelessWidget {
           ),
         );
       }
-      
+
       // Then navigate to item detail
       navigator.push(
         MaterialPageRoute(
@@ -381,8 +392,9 @@ class DownloadsPage extends StatelessWidget {
       );
     }
   }
-  
-  Future<void> _deleteDownload(BuildContext context, DownloadTask task, DownloadManagerService downloadManager) async {
+
+  Future<void> _deleteDownload(BuildContext context, DownloadTask task,
+      DownloadManagerService downloadManager) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -411,13 +423,14 @@ class DownloadsPage extends StatelessWidget {
         ],
       ),
     );
-    
+
     if (confirmed == true) {
       await downloadManager.removeDownload(task.id);
     }
   }
-  
-  Future<void> _deleteAllDownloads(BuildContext context, DownloadManagerService downloadManager) async {
+
+  Future<void> _deleteAllDownloads(
+      BuildContext context, DownloadManagerService downloadManager) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -446,18 +459,19 @@ class DownloadsPage extends StatelessWidget {
         ],
       ),
     );
-    
+
     if (confirmed == true) {
       // Delete all downloads
       final taskIds = downloadManager.tasks.map((t) => t.id).toList();
       for (final taskId in taskIds) {
         await downloadManager.removeDownload(taskId);
       }
-      
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Deleted ${taskIds.length} download${taskIds.length > 1 ? 's' : ''}'),
+            content: Text(
+                'Deleted ${taskIds.length} download${taskIds.length > 1 ? 's' : ''}'),
             backgroundColor: AppTheme.accent,
           ),
         );

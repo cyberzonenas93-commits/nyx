@@ -70,6 +70,29 @@ import AVFAudio
         } else {
           result(nil)
         }
+      } else if call.method == "excludeFromBackup" {
+        // Vault thumbnails are poster frames of the user's private media and
+        // live under Documents, which iCloud/iTunes back up by default. Mark
+        // them excluded so a recognizable frame of every vault video does not
+        // leave the device in a backup.
+        guard let args = call.arguments as? [String: Any],
+              let path = args["path"] as? String else {
+          result(FlutterError(code: "INVALID_ARGS", message: "path is required", details: nil))
+          return
+        }
+        var url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path) else {
+          result(false)
+          return
+        }
+        do {
+          var values = URLResourceValues()
+          values.isExcludedFromBackup = true
+          try url.setResourceValues(values)
+          result(true)
+        } catch {
+          result(FlutterError(code: "EXCLUDE_FAILED", message: error.localizedDescription, details: nil))
+        }
       } else {
         result(FlutterMethodNotImplemented)
       }
@@ -103,7 +126,9 @@ import AVFAudio
       guard let self = self, let application = UIApplication.shared as? UIApplication else { result(nil); return }
       switch call.method {
       case "requestBackgroundExecution":
-        self.backgroundTaskID = application.beginBackgroundTask(withName: "ImportTask") {
+        let args = call.arguments as? [String: Any]
+        let reason = args?["reason"] as? String ?? "BackgroundTask"
+        self.backgroundTaskID = application.beginBackgroundTask(withName: reason) {
           if self.backgroundTaskID != .invalid {
             application.endBackgroundTask(self.backgroundTaskID)
             self.backgroundTaskID = .invalid
