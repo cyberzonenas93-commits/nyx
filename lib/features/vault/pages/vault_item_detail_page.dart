@@ -49,6 +49,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   VideoPlayerController? _videoController;
   String? _activeVideoItemId; // ID of item currently using the controller
   int _currentVideoInitId = 0; // Monotonic counter for cancellation
+  bool _videoIsStreaming = false; // Current controller plays the stream URL
+  String? _streamFallbackItemId; // Item whose stream failed: use a file
 
   // Path-based file references (no Uint8List loading for viewing)
   File? _audioFile;
@@ -259,18 +261,8 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         }
         return;
       }
-      if (item.sizeBytes > 300 * 1024 * 1024) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                  'Poster generation is disabled for very large videos on iOS (stability).'),
-              backgroundColor: AppTheme.warning,
-            ),
-          );
-        }
-        return;
-      }
+      // No size limit: posters for encrypted videos read a few ranges over
+      // the playback stream instead of decrypting the whole file.
     }
 
     if (mounted) {
@@ -428,20 +420,27 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     if (mounted) setState(() => _videoDecrypting = true);
 
     try {
-      // Get file path directly from vault (no memory loading, no temp file)
       final vaultService = Provider.of<VaultService>(context, listen: false);
-      final videoFilePath = await vaultService.getDecryptedFilePath(item.id);
+
+      // Encrypted videos stream from the loopback server, which decrypts only
+      // the ranges the player reads: playback starts at once at any size. A
+      // full decrypt to a temp file is only the fallback (and legacy
+      // plaintext items play their file directly).
+      final streamUri = _streamFallbackItemId == item.id
+          ? null
+          : await vaultService.getVideoStreamUri(item.id);
+      String? videoFilePath;
+      if (streamUri == null) {
+        videoFilePath = await vaultService.getDecryptedFilePath(item.id);
+        if (videoFilePath == null) {
+          throw Exception('Video file not found in vault');
+        }
+        if (!await File(videoFilePath).exists()) {
+          throw Exception('Video file does not exist: $videoFilePath');
+        }
+      }
 
       if (mounted) setState(() => _videoDecrypting = false);
-
-      if (videoFilePath == null) {
-        throw Exception('Video file not found in vault');
-      }
-
-      final videoFile = File(videoFilePath);
-      if (!await videoFile.exists()) {
-        throw Exception('Video file does not exist: $videoFilePath');
-      }
 
       // Check if cancelled or item changed
       if (!mounted ||
@@ -452,11 +451,10 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
         return;
       }
 
-      debugPrint(
-          '[VaultItemDetail] Initializing video player from path: $videoFilePath');
-
-      // Create controller directly from vault file path (NO temp file rewriting)
-      _videoController = VideoPlayerController.file(videoFile);
+      _videoIsStreaming = streamUri != null;
+      _videoController = streamUri != null
+          ? VideoPlayerController.networkUrl(streamUri)
+          : VideoPlayerController.file(File(videoFilePath!));
 
       // Check cancellation again
       if (!mounted ||
@@ -527,6 +525,23 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
     } catch (e, stackTrace) {
       debugPrint('[VaultItemDetail] ❌ Video initialization error: $e');
       debugPrint('[VaultItemDetail] Stack trace: $stackTrace');
+
+      // A stream failure gets one retry from a decrypted file before any
+      // error is shown.
+      if (_videoIsStreaming &&
+          mounted &&
+          _currentItem.id == item.id &&
+          _currentVideoInitId == initId) {
+        _videoIsStreaming = false;
+        _streamFallbackItemId = item.id;
+        await _videoController?.dispose();
+        _videoController = null;
+        _activeVideoItemId = null;
+        if (mounted && _currentItem.id == item.id) {
+          unawaited(_initializeVideoPlayer());
+        }
+        return;
+      }
 
       // Only show error if this is still the active item
       if (mounted &&

@@ -16,8 +16,10 @@ import '../models/album.dart';
 import '../models/vault_folder.dart';
 import 'background_execution_service.dart';
 import 'encryption_service.dart';
+import 'native_vault_crypto.dart';
 import 'thumbnail_cache_service.dart';
 import 'vault_cipher.dart';
+import 'vault_stream_server.dart';
 
 /// Process image thumbnail in isolate (must be top-level function)
 Uint8List? _processImageThumbnail(Uint8List imageData) {
@@ -36,6 +38,45 @@ Uint8List? _processImageThumbnail(Uint8List imageData) {
     debugPrint('[VaultService] Error in isolate image processing: $e');
   }
   return null;
+}
+
+/// Poster for a video the platform cannot decode (WebM/VP9 or AV1 on most
+/// iPhones): a dark card with a play mark and the format, so the tile still
+/// reads as a video instead of an empty or failed import.
+@visibleForTesting
+Uint8List drawFallbackVideoPoster(String label) {
+  const w = 320, h = 180;
+  final image = img.Image(width: w, height: h);
+  for (var y = 0; y < h; y++) {
+    final t = y / h;
+    img.fillRect(image,
+        x1: 0,
+        y1: y,
+        x2: w - 1,
+        y2: y,
+        color: img.ColorRgb8((0x16 + 0x12 * t).round(),
+            (0x16 + 0x0A * t).round(), (0x20 + 0x18 * t).round()));
+  }
+  img.fillCircle(image,
+      x: w ~/ 2,
+      y: h ~/ 2 - 12,
+      radius: 36,
+      color: img.ColorRgba8(255, 255, 255, 46),
+      antialias: true);
+  img.fillPolygon(image,
+      vertices: <img.Point>[
+        img.Point(w / 2 - 11, h / 2 - 33),
+        img.Point(w / 2 - 11, h / 2 + 9),
+        img.Point(w / 2 + 23, h / 2 - 12),
+      ],
+      color: img.ColorRgb8(236, 236, 242));
+  final text = label.toUpperCase();
+  img.drawString(image, text,
+      font: img.arial24,
+      x: (w - text.length * 14) ~/ 2,
+      y: h - 46,
+      color: img.ColorRgb8(196, 196, 208));
+  return Uint8List.fromList(img.encodeJpg(image, quality: 82));
 }
 
 class _SingleDigestSink implements Sink<Digest> {
@@ -330,6 +371,17 @@ class VaultService extends ChangeNotifier {
   // same temp file while AVFoundation is trying to parse it.
   final Map<String, Future<String?>> _decryptedTempJobs = {};
   Directory? _decryptedTempDir;
+
+  // Loopback server that streams encrypted videos to the player, decrypting
+  // only the ranges it reads. Started on first use, stopped on lock.
+  VaultStreamServer? _streamServer;
+
+  // Missing-poster backfill: bumped on every (re)initialize and lock so a run
+  // for an old session stops; failures are not retried within a session.
+  int _posterBackfillGeneration = 0;
+  final Set<String> _posterBackfillFailed = <String>{};
+  Future<int>? _activePosterBackfill;
+  int _activePosterBackfillGeneration = -1;
 
   Future<String> _computeSha256ForFilePath(String filePath) async {
     final file = File(filePath);
@@ -626,6 +678,12 @@ class VaultService extends ChangeNotifier {
       _isInitialized = false;
     }
 
+    // A new unlock or vault switch gets a new stream token, and any poster
+    // backfill from the previous session stops.
+    _posterBackfillGeneration++;
+    _posterBackfillFailed.clear();
+    await _streamServer?.stop();
+
     _currentMasterKey = masterKey;
     _currentVaultId = vaultId;
 
@@ -678,13 +736,20 @@ class VaultService extends ChangeNotifier {
 
     // Sweep any plaintext left in tmp/ by a session that was killed before it
     // could lock (iOS purges tmp/ eventually, but not promptly).
-    unawaited(clearDecryptedCache().catchError((Object e) {
+    unawaited(clearDecryptedCache(stopStreaming: false).catchError((Object e) {
       debugPrint('[VaultService] Startup decrypted-cache sweep failed: $e');
     }));
 
     unawaited(_excludeThumbnailsFromBackup());
 
     notifyListeners();
+
+    // Every video gets a poster: fill in any that are missing (older imports,
+    // downloads, Wi-Fi transfers, or a poster file that went missing).
+    unawaited(backfillMissingVideoThumbnails().catchError((Object e) {
+      debugPrint('[VaultService] Poster backfill failed: $e');
+      return 0;
+    }));
 
     if (doICloudBackup) {
       unawaited(_initializeICloudBackup().catchError((e) {
@@ -1097,6 +1162,13 @@ class VaultService extends ChangeNotifier {
     required File source,
     required File dest,
   }) async {
+    final native = await NativeVaultCrypto.encryptFile(
+      sourcePath: source.path,
+      destPath: dest.path,
+      fileKey: _cipher.deriveFileKey(masterKey, fileId),
+      fileId: fileId,
+    );
+    if (native != null) return;
     await compute(
       _encryptVaultFileInWorker,
       _VaultFileCryptoParams(
@@ -1114,6 +1186,13 @@ class VaultService extends ChangeNotifier {
     required File source,
     required File dest,
   }) async {
+    final native = await NativeVaultCrypto.decryptFile(
+      sourcePath: source.path,
+      destPath: dest.path,
+      fileKey: _cipher.deriveFileKey(masterKey, fileId),
+      fileId: fileId,
+    );
+    if (native != null) return;
     await compute(
       _decryptVaultFileInWorker,
       _VaultFileCryptoParams(
@@ -1133,6 +1212,21 @@ class VaultService extends ChangeNotifier {
     required Duration idleTimeout,
     required bool computeSha256,
   }) async {
+    // CryptoKit first: disk-bound instead of ~18 MiB/s, which is what makes a
+    // video import finish in about the time it takes to copy the file.
+    final native = await NativeVaultCrypto.encryptFile(
+      sourcePath: source.path,
+      destPath: dest.path,
+      fileKey: _cipher.deriveFileKey(masterKey, fileId),
+      fileId: fileId,
+      computeSha256: computeSha256,
+    );
+    if (native != null) {
+      return _VaultPathImportResult(
+        bytesCopied: native.bytes,
+        sha256Digest: computeSha256 ? native.sha256 : '',
+      );
+    }
     return compute(
       _encryptVaultImportInWorker,
       _VaultPathImportParams(
@@ -2725,6 +2819,35 @@ class VaultService extends ChangeNotifier {
     if (_currentMasterKey == null) {
       throw StateError('Cannot store file: vault master key is not set');
     }
+
+    // The poster is made from the *plaintext source*, while it is still on
+    // disk and before the item is registered as encrypted, and it runs
+    // alongside encryption so it adds no time to the import.
+    //
+    // Why from the source: every media import path passes
+    // queueThumbnailGeneration: false, so items used to end up with no
+    // thumbnail at all; afterwards it would need the encrypted path.
+    // _generateThumbnail returns null on any failure, and a missing poster
+    // must never fail the import (the unlock backfill retries it).
+    final Future<String?> posterFuture = () async {
+      try {
+        if (fileType == VaultItemType.video || fileType == VaultItemType.audio) {
+          return await _generateThumbnail(
+              fileId, sourceFilePath, fileType, null);
+        }
+        if (fileType == VaultItemType.photo) {
+          // The image decoder needs bytes; photos are small enough to read.
+          final sourceBytes = await sourceFile.readAsBytes();
+          return await _generateThumbnail(
+              fileId, sourceFilePath, fileType, sourceBytes);
+        }
+      } catch (e) {
+        debugPrint(
+            '[VaultService] Thumbnail generation failed for $fileId (import continues): $e');
+      }
+      return null;
+    }();
+
     bool copySucceeded = false;
     final idleTimeout = Platform.isIOS
         ? const Duration(seconds: 120)
@@ -2802,6 +2925,8 @@ class VaultService extends ChangeNotifier {
         } catch (_) {
           // Ignore cleanup failures.
         }
+        // And the poster made for it.
+        unawaited(posterFuture.then(_deleteThumbnailFile));
       }
     }
     if (incomingDigest.isNotEmpty) {
@@ -2817,6 +2942,7 @@ class VaultService extends ChangeNotifier {
             await destFile.delete();
           }
         } catch (_) {}
+        await _deleteThumbnailFile(await posterFuture);
         return duplicate;
       }
     }
@@ -2829,36 +2955,7 @@ class VaultService extends ChangeNotifier {
     );
     mergedMetadata[kEncryptionMetadataKey] = kEncryptionVersion;
 
-    // The thumbnail is generated from the *plaintext source*, while it is still
-    // on disk and before the item is registered as encrypted.
-    //
-    // Two reasons this happens here rather than after the item is added:
-    //   1. Every media import path passes queueThumbnailGeneration: false, and
-    //      the background backfill service is never enabled — so items used to
-    //      end up with no thumbnail at all and rendered as a blank placeholder,
-    //      which reads to the user as a failed import.
-    //   2. Generating it afterwards would send _generateThumbnail down the
-    //      encrypted branch, decrypting the whole file to a temp copy just to
-    //      read one frame.
-    // _generateThumbnail is fully guarded internally (timeout, size cap, null
-    // on any failure), and a missing thumbnail must never fail the import.
-    String? initialThumbnailPath;
-    try {
-      if (fileType == VaultItemType.video || fileType == VaultItemType.audio) {
-        // The native extractor takes a path.
-        initialThumbnailPath =
-            await _generateThumbnail(fileId, sourceFilePath, fileType, null);
-      } else if (fileType == VaultItemType.photo) {
-        // The image decoder needs bytes. Photos are small enough to read whole;
-        // video deliberately never takes this branch.
-        final sourceBytes = await sourceFile.readAsBytes();
-        initialThumbnailPath = await _generateThumbnail(
-            fileId, sourceFilePath, fileType, sourceBytes);
-      }
-    } catch (e) {
-      debugPrint(
-          '[VaultService] Thumbnail generation failed for $fileId (import continues): $e');
-    }
+    final initialThumbnailPath = await posterFuture;
 
     final item = VaultItem(
       id: fileId,
@@ -2880,7 +2977,14 @@ class VaultService extends ChangeNotifier {
 
     // Generate thumbnail in background (use file path, not data).
     // For bulk imports, callers can disable this and explicitly generate thumbnails in a controlled manner.
-    if (queueThumbnailGeneration && initialThumbnailPath == null) {
+    // Videos always get a poster: if the source-side attempt failed (or was
+    // skipped for a huge file), read it from the stored copy over the stream.
+    if (fileType == VaultItemType.video && initialThumbnailPath == null) {
+      unawaited(generateThumbnailForItem(fileId).catchError((Object e) {
+        debugPrint('[VaultService] Poster from stored copy failed: $e');
+        return null;
+      }));
+    } else if (queueThumbnailGeneration && initialThumbnailPath == null) {
       _enqueueThumbnailGeneration(
               () => _generateThumbnailAsync(fileId, destPath, fileType, null))
           .then((generatedThumbnailPath) {
@@ -2953,14 +3057,28 @@ class VaultService extends ChangeNotifier {
       // If we have an encrypted source and no plaintext bytes, materialize plaintext
       // to a temp file (videos) or read decrypted bytes (photos) before decoding.
       String workingPath = filePath;
+      String? streamUrl;
+      var decryptedForPoster = false;
       final itemIdx = _items.indexWhere((i) => i.id == fileId);
       final isEncrypted = itemIdx >= 0 && _isItemEncrypted(_items[itemIdx]);
       if (isEncrypted) {
         if (type == VaultItemType.photo && originalData == null) {
           // Decrypt bytes for the image decoder.
           originalData = await getFileData(fileId);
-        } else if (type == VaultItemType.video || type == VaultItemType.audio) {
-          // VideoThumbnail / AVAsset need a plaintext file path.
+        } else if (type == VaultItemType.video) {
+          // AVAssetImageGenerator reads a few ranges over the loopback stream,
+          // so a poster never needs the whole video decrypted first.
+          final streamUri = await getVideoStreamUri(fileId);
+          if (streamUri != null) {
+            streamUrl = streamUri.toString();
+          } else {
+            final decrypted = await getDecryptedFilePath(fileId);
+            if (decrypted != null) {
+              workingPath = decrypted;
+              decryptedForPoster = true;
+            }
+          }
+        } else if (type == VaultItemType.audio) {
           final decrypted = await getDecryptedFilePath(fileId);
           if (decrypted != null) {
             workingPath = decrypted;
@@ -2992,72 +3110,19 @@ class VaultService extends ChangeNotifier {
           }
         }
       } else if (type == VaultItemType.video) {
-        // Generate video thumbnail screenshot from FIRST FRAME (0ms) - performance requirement
-        debugPrint(
-            '[VaultService] Generating video thumbnail from first frame (0ms): $workingPath');
-        try {
-          // Verify file exists before attempting thumbnail generation
-          final videoFile = File(workingPath);
-          if (!await videoFile.exists()) {
-            debugPrint(
-                '[VaultService] ERROR: Video file does not exist: $workingPath');
-            thumbnailData = null;
-          } else {
-            final fileSize = await videoFile.length();
-            debugPrint(
-                '[VaultService] Video file exists, size: $fileSize bytes');
-
-            if (fileSize == 0) {
-              debugPrint(
-                  '[VaultService] ERROR: Video file is empty: $workingPath');
-              thumbnailData = null;
-            } else {
-              // Anti-crash guard: skip extremely large videos on iOS (native extractor can OOM/crash)
-              if (Platform.isIOS && fileSize > 750 * 1024 * 1024) {
-                debugPrint(
-                    '[VaultService] iOS: skipping thumbnail for huge video (>750MB): $workingPath');
-                thumbnailData = null;
-              } else {
-                // Generate thumbnail at FIRST FRAME (0ms) - requirement for instant poster display
-                try {
-                  thumbnailData = await VideoThumbnail.thumbnailData(
-                    video: workingPath,
-                    imageFormat: ImageFormat.JPEG,
-                    // Reduce memory pressure on iOS
-                    maxWidth: Platform.isIOS ? 240 : 320,
-                    quality: Platform.isIOS ? 60 : 75,
-                    timeMs: 0, // FIRST FRAME ONLY - no 1-second strategy
-                  ).timeout(
-                    Platform.isIOS
-                        ? const Duration(seconds: 6)
-                        : const Duration(seconds: 10),
-                    onTimeout: () {
-                      debugPrint(
-                          '[VaultService] Video thumbnail generation timed out: $workingPath');
-                      return null;
-                    },
-                  );
-
-                  if (thumbnailData != null) {
-                    debugPrint(
-                        '[VaultService] Successfully generated video thumbnail from first frame: ${thumbnailData.length} bytes');
-                  } else {
-                    debugPrint(
-                        '[VaultService] ERROR: Video thumbnail generation returned null for: $workingPath');
-                  }
-                } catch (e) {
-                  debugPrint(
-                      '[VaultService] Error generating video thumbnail from first frame: $e');
-                  thumbnailData = null;
-                }
-              }
-            }
+        thumbnailData = await _extractVideoPoster(
+          streamUrl ?? workingPath,
+          isStream: streamUrl != null,
+        );
+        if (decryptedForPoster) {
+          // The poster was the only reason for this plaintext copy; do not
+          // leave one per video in tmp/ during a backfill.
+          final temp = _decryptedTempPaths.remove(fileId);
+          if (temp != null) {
+            try {
+              await File(temp).delete();
+            } catch (_) {}
           }
-        } catch (e, stackTrace) {
-          debugPrint(
-              '[VaultService] CRITICAL ERROR generating video thumbnail: $e');
-          debugPrint('[VaultService] Stack trace: $stackTrace');
-          thumbnailData = null; // Ensure null on error
         }
       } else if (type == VaultItemType.audio) {
         // Generate audio waveform or icon thumbnail
@@ -3092,6 +3157,52 @@ class VaultService extends ChangeNotifier {
       debugPrint('[VaultService] Error generating thumbnail: $e');
     }
 
+    return null;
+  }
+
+  Future<void> _deleteThumbnailFile(String? relativePath) async {
+    if (relativePath == null || _vaultDirectory == null) return;
+    try {
+      final file = File('${_vaultDirectory!.path}/$relativePath');
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  /// First-frame poster as JPEG bytes, or null. [source] is a file path or,
+  /// for encrypted videos, a loopback stream URL.
+  Future<Uint8List?> _extractVideoPoster(String source,
+      {required bool isStream}) async {
+    if (!isStream) {
+      final videoFile = File(source);
+      if (!await videoFile.exists()) {
+        debugPrint('[VaultService] Video file does not exist: $source');
+        return null;
+      }
+      final fileSize = await videoFile.length();
+      if (fileSize == 0) return null;
+      // The native extractor maps a local file; very large plaintext copies
+      // have crashed it. The stream path reads only what it needs.
+      if (Platform.isIOS && fileSize > 750 * 1024 * 1024) {
+        debugPrint('[VaultService] iOS: skipping poster for huge file: $source');
+        return null;
+      }
+    }
+    // Frame 0 first; some videos open on a black or missing frame, so try a
+    // second in before giving up.
+    for (final timeMs in const <int>[0, 1000]) {
+      try {
+        final data = await VideoThumbnail.thumbnailData(
+          video: source,
+          imageFormat: ImageFormat.JPEG,
+          maxWidth: Platform.isIOS ? 240 : 320,
+          quality: Platform.isIOS ? 60 : 75,
+          timeMs: timeMs,
+        ).timeout(const Duration(seconds: 10), onTimeout: () => null);
+        if (data != null && data.isNotEmpty) return data;
+      } catch (e) {
+        debugPrint('[VaultService] Poster extraction failed at ${timeMs}ms: $e');
+      }
+    }
     return null;
   }
 
@@ -3257,6 +3368,132 @@ class VaultService extends ChangeNotifier {
     }
   }
 
+  /// A URL the platform video player can open right away for [itemId].
+  ///
+  /// Encrypted items are served by a loopback server that decrypts only the
+  /// byte ranges the player reads, so playback starts at once whatever the
+  /// size and nothing decrypted is written to disk. Returns null for legacy
+  /// plaintext items (play their file directly), when locked, or when the
+  /// server cannot start (callers then fall back to [getDecryptedFilePath]).
+  Future<Uri?> getVideoStreamUri(String itemId) async {
+    if (!_isInitialized || _currentMasterKey == null) return null;
+    final index = _items.indexWhere((i) => i.id == itemId);
+    if (index < 0 || !_isItemEncrypted(_items[index])) return null;
+    try {
+      _streamServer ??= VaultStreamServer(
+        resolve: _resolveStreamSource,
+        decrypt: _decryptChunksForStream,
+      );
+      return await _streamServer!
+          .uriFor(itemId, extension: _items[index].extension);
+    } catch (e) {
+      debugPrint('[VaultService] Stream server unavailable: $e');
+      return null;
+    }
+  }
+
+  VaultStreamSource? _resolveStreamSource(String itemId) {
+    if (!_isInitialized || _currentMasterKey == null) return null;
+    final index = _items.indexWhere((i) => i.id == itemId);
+    if (index < 0) return null;
+    final item = _items[index];
+    if (!_isItemEncrypted(item)) return null;
+    final path = _resolveVaultFilePathForItem(item);
+    if (path == null) return null;
+    return VaultStreamSource(
+      cipherPath: path,
+      fileId: item.id,
+      contentType:
+          VaultStreamServer.contentTypeFor(item.extension, item.mimeType),
+    );
+  }
+
+  Future<Uint8List> _decryptChunksForStream(
+      VaultStreamSource source, int firstChunk, int count) async {
+    final masterKey = _currentMasterKey;
+    if (masterKey == null) throw StateError('Vault is locked');
+    final native = await NativeVaultCrypto.decryptChunks(
+      sourcePath: source.cipherPath,
+      fileKey: _cipher.deriveFileKey(masterKey, source.fileId),
+      fileId: source.fileId,
+      firstChunk: firstChunk,
+      count: count,
+    );
+    if (native != null) return native;
+    final file = File(source.cipherPath);
+    final raf = await file.open();
+    try {
+      return await _cipher.decryptChunkRange(
+        masterKey: masterKey,
+        fileId: source.fileId,
+        raf: raf,
+        fileLength: await raf.length(),
+        firstChunk: firstChunk,
+        count: count,
+      );
+    } finally {
+      await raf.close();
+    }
+  }
+
+  /// Generates posters for every video that has none, or whose poster file is
+  /// gone, one at a time. Runs after unlock; stops on lock or vault switch.
+  /// Returns how many posters were made.
+  /// A call while a run for the same session is active joins that run.
+  Future<int> backfillMissingVideoThumbnails() {
+    final active = _activePosterBackfill;
+    if (active != null && _activePosterBackfillGeneration == _posterBackfillGeneration) {
+      return active;
+    }
+    final run = _runPosterBackfill();
+    _activePosterBackfill = run;
+    _activePosterBackfillGeneration = _posterBackfillGeneration;
+    run.whenComplete(() {
+      if (identical(_activePosterBackfill, run)) _activePosterBackfill = null;
+    }).ignore();
+    return run;
+  }
+
+  Future<int> _runPosterBackfill() async {
+    final generation = _posterBackfillGeneration;
+    // Let the vault grid render first.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    var made = 0;
+    for (final item in List<VaultItem>.of(_items)) {
+      if (generation != _posterBackfillGeneration ||
+          !_isInitialized ||
+          _currentMasterKey == null) {
+        break;
+      }
+      if (item.type != VaultItemType.video) continue;
+      if (_posterBackfillFailed.contains(item.id)) continue;
+      final existing = getThumbnailPathForItem(item);
+      final hasPoster = existing != null && await File(existing).exists();
+      // A stand-in poster on a container AVFoundation normally decodes may be
+      // from a one-off failure: try for a real frame again once per unlock.
+      final retryFallback = hasPoster &&
+          item.metadata?['posterFallback'] == true &&
+          const <String>{'mp4', 'mov', 'm4v', '3gp'}
+              .contains((item.extension ?? '').toLowerCase());
+      if (hasPoster && !retryFallback) continue;
+      final path = await generateThumbnailForItem(item.id,
+          forceRegenerate: existing != null);
+      if (retryFallback) {
+        _posterBackfillFailed.add(item.id);
+        continue;
+      }
+      if (path != null) {
+        made++;
+      } else {
+        _posterBackfillFailed.add(item.id);
+      }
+    }
+    if (made > 0) {
+      debugPrint('[VaultService] Poster backfill made $made posters');
+    }
+    return made;
+  }
+
   Future<String?> _materializeDecryptedFile({
     required VaultItem item,
     required String cipherPath,
@@ -3340,7 +3577,15 @@ class VaultService extends ChangeNotifier {
   }
 
   /// Delete all decrypted temp files. Call on vault lock.
-  Future<void> clearDecryptedCache() async {
+  ///
+  /// Also stops the playback stream server (unless [stopStreaming] is false,
+  /// used by the sweep right after unlock) so its URLs stop working, and stops
+  /// any poster backfill.
+  Future<void> clearDecryptedCache({bool stopStreaming = true}) async {
+    if (stopStreaming) {
+      _posterBackfillGeneration++;
+      await _streamServer?.stop();
+    }
     // Let authenticated writes finish (or fail) before removing their output.
     // Otherwise an isolate could recreate plaintext after the lock cleanup.
     final activeJobs = _decryptedTempJobs.values.toSet().toList();
@@ -3432,6 +3677,23 @@ class VaultService extends ChangeNotifier {
 
     final file = File(filePath);
     if (!await file.exists()) return null;
+
+    if (_isItemEncrypted(item)) {
+      final effectiveMasterKey = masterKey ?? _currentMasterKey;
+      if (effectiveMasterKey != null) {
+        final cipherLength = await file.length();
+        final chunks = (cipherLength - 1 + VaultCipher.chunkOnDiskSize - 1) ~/
+            VaultCipher.chunkOnDiskSize;
+        final native = await NativeVaultCrypto.decryptChunks(
+          sourcePath: filePath,
+          fileKey: _cipher.deriveFileKey(effectiveMasterKey, item.id),
+          fileId: item.id,
+          firstChunk: 0,
+          count: chunks < 1 ? 1 : chunks,
+        );
+        if (native != null) return native;
+      }
+    }
 
     final readStart = DateTime.now();
     final raw = await file.readAsBytes();
@@ -3588,13 +3850,41 @@ class VaultService extends ChangeNotifier {
 
     // _generateThumbnail handles encrypted items by materializing a temp copy
     // when a native decoder needs a plaintext path.
-    final thumbnailPath = await _enqueueThumbnailGeneration(
+    var thumbnailPath = await _enqueueThumbnailGeneration(
       () => _generateThumbnail(itemId, filePath, item.type, null),
     );
+    var usedFallback = false;
+    if (thumbnailPath == null &&
+        item.type == VaultItemType.video &&
+        _thumbnailsDirectory != null) {
+      // No decodable frame: still give the video a poster. Flagged in metadata
+      // so a later decoder can find and replace these.
+      try {
+        final name = '${itemId}_thumb.jpg';
+        await File('${_thumbnailsDirectory!.path}/$name').writeAsBytes(
+            drawFallbackVideoPoster(
+                (item.extension ?? 'video').toUpperCase()));
+        thumbnailPath = 'thumbnails/$name';
+        usedFallback = true;
+      } catch (e) {
+        debugPrint('[VaultService] Fallback poster failed for $itemId: $e');
+      }
+    }
 
     if (thumbnailPath != null) {
-      // Update item with thumbnail path
-      _items[itemIndex] = item.copyWith(thumbnailPath: thumbnailPath);
+      // Update item with thumbnail path (look it up again: the poster step
+      // awaited, so the list may have changed).
+      final currentIndex = _items.indexWhere((i) => i.id == itemId);
+      if (currentIndex < 0) return thumbnailPath;
+      final current = _items[currentIndex];
+      final metadata = Map<String, dynamic>.from(current.metadata ?? const {});
+      if (usedFallback) {
+        metadata['posterFallback'] = true;
+      } else {
+        metadata.remove('posterFallback');
+      }
+      _items[currentIndex] =
+          current.copyWith(thumbnailPath: thumbnailPath, metadata: metadata);
       _scheduleIndexSave();
       notifyListeners();
       debugPrint(

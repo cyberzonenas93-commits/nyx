@@ -243,6 +243,76 @@ class VaultCipher {
     );
   }
 
+  /// On-disk size of one full chunk: nonce + 1 MiB ciphertext + tag.
+  static const int chunkOnDiskSize = nonceLength + chunkPlaintextSize + tagLength;
+
+  /// Byte offset of chunk [chunkIndex] inside a ciphertext file. Every chunk
+  /// before the last is full size, so any chunk can be read without scanning.
+  static int cipherOffsetOfChunk(int chunkIndex) =>
+      1 + chunkIndex * chunkOnDiskSize;
+
+  /// Plaintext length of a ciphertext file of [cipherLength] bytes.
+  /// Throws [VaultCipherException] when the length cannot be a vault file.
+  static int plaintextLengthForCipherLength(int cipherLength) {
+    final body = cipherLength - 1;
+    if (body < nonceLength + tagLength) {
+      throw VaultCipherException('Ciphertext too short ($cipherLength bytes)');
+    }
+    final fullChunks = body ~/ chunkOnDiskSize;
+    final rest = body % chunkOnDiskSize;
+    if (rest == 0) return fullChunks * chunkPlaintextSize;
+    if (rest < nonceLength + tagLength) {
+      throw VaultCipherException('Truncated final chunk ($rest bytes)');
+    }
+    return fullChunks * chunkPlaintextSize + rest - nonceLength - tagLength;
+  }
+
+  /// AAD prefix for [fileId]: the first 8 bytes of sha256(fileId). The native
+  /// cipher receives this plus the derived file key, so key derivation stays
+  /// in one place (here).
+  static Uint8List fileIdHashFor(String fileId) {
+    final digest = sha256.convert(utf8.encode(fileId)).bytes;
+    return Uint8List.fromList(digest.sublist(0, 8));
+  }
+
+  /// Decrypt [count] chunks starting at [firstChunk] from an open ciphertext
+  /// file. Stops early at end of file. Pure Dart; the playback server prefers
+  /// the native cipher and only falls back to this.
+  Future<Uint8List> decryptChunkRange({
+    required Uint8List masterKey,
+    required String fileId,
+    required RandomAccessFile raf,
+    required int fileLength,
+    required int firstChunk,
+    required int count,
+  }) async {
+    final fileKey = deriveFileKey(masterKey, fileId);
+    final fileIdHash = _fileIdHash(fileId);
+    final out = BytesBuilder(copy: false);
+    for (var i = firstChunk; i < firstChunk + count; i++) {
+      final offset = cipherOffsetOfChunk(i);
+      if (offset >= fileLength) break;
+      final remaining = fileLength - offset;
+      final len = remaining > chunkOnDiskSize ? chunkOnDiskSize : remaining;
+      if (len < nonceLength + tagLength) {
+        throw VaultCipherException('Truncated chunk at offset $offset');
+      }
+      await raf.setPosition(offset);
+      final bytes = await raf.read(len);
+      if (bytes.length != len) {
+        throw VaultCipherException('Short read at offset $offset');
+      }
+      out.add(_gcmProcess(
+          false,
+          fileKey,
+          Uint8List.sublistView(bytes, 0, nonceLength),
+          Uint8List.sublistView(bytes, nonceLength),
+          fileIdHash,
+          i));
+    }
+    return out.toBytes();
+  }
+
   /// Cheap heuristic to detect "this might be one of our ciphertext files".
   /// Authoritative source for whether a file is encrypted is the
   /// `metadata.encryption` flag on the [VaultItem] — this is just a guard for
@@ -262,10 +332,7 @@ class VaultCipher {
 
   // ---------------- internals ----------------
 
-  Uint8List _fileIdHash(String fileId) {
-    final digest = sha256.convert(utf8.encode(fileId)).bytes;
-    return Uint8List.fromList(digest.sublist(0, 8));
-  }
+  Uint8List _fileIdHash(String fileId) => fileIdHashFor(fileId);
 
   Uint8List _aadFor(Uint8List fileIdHash, int chunkIndex) {
     final aad = Uint8List(12);
