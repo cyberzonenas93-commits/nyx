@@ -52,7 +52,11 @@ class _DuplicatesPageState extends State<DuplicatesPage> {
     });
     final groups = await context.read<VaultService>().findDuplicateGroups(
       onProgress: (done, total) {
-        if (mounted) setState(() => (_done, _total) = (done, total));
+        if (!mounted) return;
+        setState(() {
+          _done = done;
+          _total = total;
+        });
       },
     );
     if (!mounted) return;

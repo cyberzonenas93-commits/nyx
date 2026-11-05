@@ -577,22 +577,25 @@ class VaultService extends ChangeNotifier {
     if (!await file.exists()) return null;
 
     try {
-      final digest = encrypted
-          ? await NativeVaultCrypto.plainSha256(
-                sourcePath: filePath,
-                fileKey: _cipher.deriveFileKey(masterKey!, item.id),
+      final String digest;
+      if (masterKey != null && encrypted) {
+        digest = await NativeVaultCrypto.plainSha256(
+              sourcePath: filePath,
+              fileKey: _cipher.deriveFileKey(masterKey, item.id),
+              fileId: item.id,
+            ) ??
+            await compute(
+              _plainSha256InWorker,
+              _VaultFileCryptoParams(
+                masterKey: Uint8List.fromList(masterKey),
                 fileId: item.id,
-              ) ??
-              await compute(
-                _plainSha256InWorker,
-                _VaultFileCryptoParams(
-                  masterKey: Uint8List.fromList(masterKey),
-                  fileId: item.id,
-                  sourcePath: filePath,
-                  destPath: '',
-                ),
-              )
-          : await _computeSha256ForFilePath(filePath);
+                sourcePath: filePath,
+                destPath: '',
+              ),
+            );
+      } else {
+        digest = await _computeSha256ForFilePath(filePath);
+      }
       final idx = _items.indexWhere((i) => i.id == item.id);
       if (idx >= 0) {
         final current = _items[idx];

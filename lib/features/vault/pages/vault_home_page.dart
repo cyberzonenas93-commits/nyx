@@ -5084,9 +5084,6 @@ class _VaultHomePageState extends State<VaultHomePage> {
   }
 
   void _showAddMenu() {
-    final vaultService = Provider.of<VaultService>(context, listen: false);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
