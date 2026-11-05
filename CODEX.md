@@ -15,6 +15,11 @@
 - Posters: a video AVFoundation cannot decode (WebM/VP9, AV1 on most iPhones) gets a generated stand-in poster (`drawFallbackVideoPoster`, metadata `posterFallback: true`). Stand-ins on mp4/mov/m4v/3gp are retried for a real frame once per unlock.
 - Backfill: `backfillMissingVideoThumbnails()` runs after every `initialize()`. It is single-flight, stops on lock, and covers videos with no poster or a missing poster file. Encrypted videos are read over the stream, so there is no full decrypt and no size cap. Plaintext copies made by the fallback are deleted after the poster is taken. The old 300 MB poster limit in the detail page is gone.
 
+## Duplicates and pause (1.0.9, build 19, 2026-11-05)
+- `findDuplicateGroups()` hashes only items that share `sizeBytes` with another item. Encrypted items are hashed by their plaintext SHA-256 (native `plainSha256` on the CryptoKit channel, Dart `_plainSha256InWorker` fallback); digests are cached in metadata `sha256`, the same key import-time dedup uses. Import-time dedup still skips encrypted items (`decryptIfNeeded` is false there) to keep imports instant.
+- `deleteDuplicateCopy(copy, keptId:)` moves the copy's folder and album memberships to the kept file, then deletes. `DuplicatesPage.open()` is the paywall gate. A set can never be fully selected.
+- Pause fix: `_buildFullContent` in the detail page auto-played on every rebuild, and every pause rebuilds it via `onPlayingStateChanged`, so pausing resumed at once. It now auto-plays once per controller (`_autoPlayedController`). Regression test: `integration_test/video_pause_test.dart`.
+
 ## Tests and gates
 - Unit tests (host, Dart cipher): `flutter test test/`. 73 pass. These include `vault_stream_server_test.dart` (ranges, tokens, tamper, stop).
 - Release gate (simulator, needs CryptoKit): `tool/sim-gate.sh integration_test/native_crypto_stream_test.dart integration_test/poster_backfill_test.dart integration_test/video_import_on_device_test.dart`.

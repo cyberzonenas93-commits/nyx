@@ -25,6 +25,7 @@ import 'vault_item_detail_page.dart';
 import 'browser_page.dart';
 import 'wifi_transfer_page.dart';
 import 'vault_settings_page.dart';
+import 'duplicates_page.dart';
 import '../../../features/unlock/pages/unlock_page.dart';
 import '../widgets/tutorial_overlay.dart';
 import 'dart:async';
@@ -5083,9 +5084,6 @@ class _VaultHomePageState extends State<VaultHomePage> {
   }
 
   void _showAddMenu() {
-    final vaultService = Provider.of<VaultService>(context, listen: false);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surface,
@@ -5147,66 +5145,14 @@ class _VaultHomePageState extends State<VaultHomePage> {
               ),
               ListTile(
                 leading: const Icon(
-                  Icons.auto_fix_high,
+                  Icons.copy_all_outlined,
                   color: AppTheme.accent,
                 ),
                 title: const Text('Remove duplicates'),
-                subtitle: const Text('Detect and delete duplicate files'),
-                onTap: () async {
+                subtitle: const Text('Find and delete extra copies (Premium)'),
+                onTap: () {
                   Navigator.pop(context);
-                  if (!mounted) return;
-                  setState(() {
-                    _isImporting = true;
-                    _importProgress = 0;
-                    _importTotal = 0;
-                    _importStatus = 'Scanning for duplicates...';
-                  });
-                  // _isImporting gates "Import videos". If it is ever left
-                  // true — a throw here, or an unmount before the clear — video
-                  // import is refused for the rest of the session with
-                  // "Finish the current import first.", while photo and file
-                  // import keep working. Always release it.
-                  try {
-                    final removed = await vaultService.removeDuplicates(
-                      onProgress: (current, total, status) {
-                        if (!mounted) return;
-                        setState(() {
-                          _isImporting = true;
-                          _importProgress = 0;
-                          _importTotal = 0;
-                          _importStatus = status;
-                        });
-                      },
-                    );
-                    if (!mounted) return;
-                    scaffoldMessenger.showSnackBar(
-                      SnackBar(
-                        content: Text('Removed $removed duplicate(s)'),
-                        backgroundColor: AppTheme.accent,
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  } catch (e) {
-                    debugPrint('[VaultHomePage] Remove duplicates failed: $e');
-                    if (mounted) {
-                      scaffoldMessenger.showSnackBar(
-                        SnackBar(
-                          content: Text('Could not remove duplicates: $e'),
-                          backgroundColor: AppTheme.warning,
-                          duration: const Duration(seconds: 4),
-                        ),
-                      );
-                    }
-                  } finally {
-                    _isImporting = false;
-                    if (mounted) {
-                      setState(() {
-                        _importProgress = 0;
-                        _importTotal = 0;
-                        _importStatus = null;
-                      });
-                    }
-                  }
+                  DuplicatesPage.open(this.context);
                 },
               ),
             ],

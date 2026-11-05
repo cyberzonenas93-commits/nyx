@@ -71,6 +71,20 @@ class NativeVaultCrypto {
     return result?.toInt();
   }
 
+  /// Lowercase hex SHA-256 of the plaintext of [sourcePath], decrypted in
+  /// memory chunk by chunk; nothing is written to disk.
+  static Future<String?> plainSha256({
+    required String sourcePath,
+    required Uint8List fileKey,
+    required String fileId,
+  }) {
+    return _invoke<String>('plainSha256', {
+      'src': sourcePath,
+      'key': fileKey,
+      'aadPrefix': VaultCipher.fileIdHashFor(fileId),
+    });
+  }
+
   /// Decrypts [count] chunks starting at [firstChunk]; stops at end of file.
   static Future<Uint8List?> decryptChunks({
     required String sourcePath,

@@ -25,6 +25,8 @@ for t in "$@"; do
     sleep 1
   done
   wait $PID; echo "exit $?"
+  # Tests save screens to /tmp/nyx-gate-shots/ (the simulator shares the Mac's /tmp).
+  if [ -d /tmp/nyx-gate-shots ]; then mkdir -p gate-shots; mv /tmp/nyx-gate-shots/*.png gate-shots/ 2>/dev/null; fi
   grep -E "NYX_PERF|All tests passed|Some tests failed|\[E\]|Expected|Actual|Error" "gate-$(basename $t .dart).log" | head -40
 done
 echo GATE_DONE

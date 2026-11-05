@@ -93,6 +93,15 @@ void main() {
             firstChunk: 1,
             count: 2);
         expect(chunk1, plainBytes.length > mib ? plainBytes.sublist(mib, min(3 * mib, size)) : isEmpty);
+        // Plaintext digest straight from ciphertext (duplicate finder).
+        expect(
+            await NativeVaultCrypto.plainSha256(
+                sourcePath: dartCt.path, fileKey: fileKey, fileId: fileId),
+            sha256.convert(plainBytes).toString());
+        expect(
+            await NativeVaultCrypto.plainSha256(
+                sourcePath: nativeCt.path, fileKey: fileKey, fileId: fileId),
+            enc.sha256);
 
         // A flipped byte or the wrong file id must fail authentication.
         if (size > 0) {
@@ -110,6 +119,10 @@ void main() {
           expect(File('${work.path}/t$size.out').existsSync(), isFalse,
               reason: 'a failed decrypt must not leave a partial output');
         }
+        await expectLater(
+            NativeVaultCrypto.plainSha256(
+                sourcePath: dartCt.path, fileKey: fileKey, fileId: 'other-id'),
+            throwsA(isA<VaultCipherException>()));
         await expectLater(
             NativeVaultCrypto.decryptChunks(
                 sourcePath: dartCt.path,

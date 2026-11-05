@@ -50,6 +50,7 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
   String? _activeVideoItemId; // ID of item currently using the controller
   int _currentVideoInitId = 0; // Monotonic counter for cancellation
   bool _videoIsStreaming = false; // Current controller plays the stream URL
+  VideoPlayerController? _autoPlayedController; // Auto-play ran for this one
   String? _streamFallbackItemId; // Item whose stream failed: use a file
 
   // Path-based file references (no Uint8List loading for viewing)
@@ -1946,22 +1947,27 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
           _activeVideoItemId == item.id;
 
       if (isControllerReady) {
-        // Ensure video is playing (might have been paused during swipe or initialization)
+        // Ensure video is playing (might have been paused during swipe or
+        // initialization). Once per controller only: this build runs again
+        // after every pause (onPlayingStateChanged -> setState), so repeating
+        // it resumed playback the moment the user paused.
         // Use microtask to avoid setState during build
-        Future.microtask(() {
-          if (mounted &&
-              _videoController != null &&
-              _videoController!.value.isInitialized &&
-              _activeVideoItemId == item.id &&
-              !_videoController!.value.isPlaying &&
-              !_videoController!.value.isCompleted) {
-            // Auto-play if not already playing
-            _videoController!.play().catchError((e) {
-              debugPrint(
-                  '[VaultItemDetail] Error auto-playing video after swipe: $e');
-            });
-          }
-        });
+        if (!identical(_autoPlayedController, _videoController)) {
+          _autoPlayedController = _videoController;
+          Future.microtask(() {
+            if (mounted &&
+                _videoController != null &&
+                _videoController!.value.isInitialized &&
+                _activeVideoItemId == item.id &&
+                !_videoController!.value.isPlaying &&
+                !_videoController!.value.isCompleted) {
+              _videoController!.play().catchError((e) {
+                debugPrint(
+                    '[VaultItemDetail] Error auto-playing video after swipe: $e');
+              });
+            }
+          });
+        }
 
         return VideoPlayerWidget(
           controller: _videoController!,
