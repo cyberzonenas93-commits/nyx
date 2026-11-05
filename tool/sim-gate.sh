@@ -24,16 +24,10 @@ for t in "$@"; do
     if [ -n "$C" ]; then mkdir -p "$C/Documents"; [ -f "$C/Documents/nyx_test_fixture.mp4" ] || cp .test_media/big_moov_end.mp4 "$C/Documents/nyx_test_fixture.mp4"; cp .test_media/poster_* "$C/Documents/" 2>/dev/null; [ -f .test_media/hevc_moov_end.mov ] && cp .test_media/hevc_moov_end.mov "$C/Documents/nyx_test_fixture_hevc.mov"; break; fi
     sleep 1
   done
-  # A test writes Documents/nyx_shot_<name> and holds the screen until the file
-  # is gone: screenshot it into gate-shots/<name>.png, then delete the request.
-  while kill -0 $PID 2>/dev/null; do
-    C=$(xcrun simctl get_app_container "$UDID" com.angelonartey.nyx data 2>/dev/null)
-    for f in "$C"/Documents/nyx_shot_*(N); do
-      mkdir -p gate-shots; xcrun simctl io "$UDID" screenshot "gate-shots/${f##*/nyx_shot_}.png" >/dev/null 2>&1; rm -f "$f"
-    done
-    sleep 0.3
-  done
   wait $PID; echo "exit $?"
+  # Tests save screens to Documents/gate_shots/; collect them.
+  C=$(xcrun simctl get_app_container "$UDID" com.angelonartey.nyx data 2>/dev/null)
+  if [ -d "$C/Documents/gate_shots" ]; then mkdir -p gate-shots; mv "$C"/Documents/gate_shots/*.png gate-shots/ 2>/dev/null; fi
   grep -E "NYX_PERF|All tests passed|Some tests failed|\[E\]|Expected|Actual|Error" "gate-$(basename $t .dart).log" | head -40
 done
 echo GATE_DONE

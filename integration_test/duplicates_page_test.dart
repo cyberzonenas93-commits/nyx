@@ -3,11 +3,13 @@
 // Duplicates page, deletes the preselected copies and checks one of each stays.
 //
 // Fixtures: Documents/poster_*.mp4 (sim-gate.sh pushes them). Screens are
-// saved to gate-shots/ through Documents/nyx_shot_<name> requests.
+// saved to Documents/gate_shots/ and copied to gate-shots/ by sim-gate.sh.
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
@@ -66,9 +68,13 @@ void main() {
     await add(photo, 'IMG_0001 (1).jpg', 'image/jpeg');
     final before = vault.items.length;
 
-    await tester.pumpWidget(ChangeNotifierProvider<VaultService>.value(
-      value: vault,
-      child: MaterialApp(theme: AppTheme.darkTheme, home: const DuplicatesPage()),
+    await tester.pumpWidget(RepaintBoundary(
+      key: _shotKey,
+      child: ChangeNotifierProvider<VaultService>.value(
+        value: vault,
+        child:
+            MaterialApp(theme: AppTheme.darkTheme, home: const DuplicatesPage()),
+      ),
     ));
     final sw = Stopwatch()..start();
     while (find.byKey(const Key('duplicates_delete')).evaluate().isEmpty &&
@@ -81,7 +87,7 @@ void main() {
         reason: '2 extra videos + 1 extra photo are preselected');
     expect(find.text('Keep'), findsNWidgets(2));
 
-    await tester.runAsync(() => _holdForScreenshot(docs, 'duplicates_found'));
+    await _shot(tester, docs, 'duplicates_found');
 
     // Tapping a kept copy while it is the last one must not select it.
     await tester.tap(find.text('Keep').first);
@@ -101,19 +107,24 @@ void main() {
     expect(vault.items.length, before - 3);
     expect(vault.items.map((i) => i.id), containsAll([v1.id, p1.id]));
 
-    await tester.runAsync(() => _holdForScreenshot(docs, 'duplicates_done'));
+    await _shot(tester, docs, 'duplicates_done');
     // ignore: avoid_print
     print('NYX_PERF duplicate scan of ${vault.items.length + 3} items: ${scanMs}ms');
   });
 }
 
-/// Asks tool/sim-gate.sh for a simulator screenshot: it watches for
-/// Documents/nyx_shot_<name>, takes the shot and deletes the file. Waits for
-/// that (20 s at most) so the screen stays put while it is taken.
-Future<void> _holdForScreenshot(Directory docs, String name) async {
-  final request = File('${docs.path}/nyx_shot_$name')..writeAsStringSync('');
-  for (var i = 0; i < 80 && request.existsSync(); i++) {
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-  }
-  await Future<void>.delayed(const Duration(milliseconds: 300));
+final _shotKey = GlobalKey();
+
+/// Saves what the page shows to Documents/gate_shots/<name>.png;
+/// tool/sim-gate.sh copies those into gate-shots/ after the run.
+Future<void> _shot(WidgetTester tester, Directory docs, String name) async {
+  await tester.runAsync(() async {
+    final boundary =
+        _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 3);
+    final png = await image.toByteData(format: ui.ImageByteFormat.png);
+    File('${docs.path}/gate_shots/$name.png')
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(png!.buffer.asUint8List());
+  });
 }
