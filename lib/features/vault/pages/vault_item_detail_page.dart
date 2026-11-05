@@ -1881,17 +1881,11 @@ class _VaultItemDetailPageState extends State<VaultItemDetailPage> {
           // Thumbnail/poster background (always visible)
           Positioned.fill(child: thumbnailWidget),
 
-          // Full content overlay (when ready)
-          // For videos, wrap in a widget that allows horizontal gestures to pass through when not in fullscreen
-          item.type == VaultItemType.video && !_isVideoFullscreen
-              ? GestureDetector(
-                  // Only handle vertical gestures and taps, let horizontal pass through to PageView
-                  onHorizontalDragStart: null,
-                  onHorizontalDragUpdate: null,
-                  onHorizontalDragEnd: null,
-                  child: _buildFullContent(item),
-                )
-              : _buildFullContent(item),
+          // Full content overlay (when ready). Same widget shape in and out of
+          // fullscreen: wrapping it only outside fullscreen (in a GestureDetector
+          // with no handlers, which did nothing) rebuilt the video player on
+          // every toggle, which resumed a paused video and dropped fullscreen.
+          _buildFullContent(item),
 
           // iOS manual poster generation (only when poster is missing)
           if (showPosterButton)

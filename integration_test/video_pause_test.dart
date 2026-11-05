@@ -94,6 +94,31 @@ void main() {
     expect(controller.value.position, pausedAt,
         reason: 'position must not move while paused');
 
+    // Entering and leaving fullscreen keeps the pause and the fullscreen state:
+    // the detail page used to swap the player's parent widget on this toggle,
+    // which rebuilt the player (auto-play again, fullscreen state lost).
+    Future<void> tapControl(Finder control) async {
+      if (control.evaluate().isEmpty) {
+        await tester.tapAt(tester.getCenter(find.byType(VideoPlayerWidget)));
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+      await tester.tap(control.first);
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    await tapControl(find.byTooltip('Enter fullscreen'));
+    expect(controller.value.isPlaying, isFalse,
+        reason: 'entering fullscreen must not resume a paused video');
+    expect(find.byIcon(Icons.fullscreen_exit), findsWidgets,
+        reason: 'the player must stay in fullscreen');
+    await tapControl(find.byIcon(Icons.fullscreen_exit));
+    expect(find.byTooltip('Enter fullscreen'), findsWidgets,
+        reason: 'the exit button must leave fullscreen');
+    expect(controller.value.isPlaying, isFalse,
+        reason: 'leaving fullscreen must not resume a paused video');
+
     // Play resumes.
     await tester.tap(find.byTooltip('Play').first);
     sw.reset();
