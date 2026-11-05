@@ -296,10 +296,18 @@ class _DuplicatesPageState extends State<DuplicatesPage> {
                 Positioned(
                   top: 6,
                   right: 6,
-                  child: Icon(
-                    selected ? Icons.delete : Icons.check_circle,
-                    size: 22,
-                    color: selected ? AppTheme.text : AppTheme.accent,
+                  // Dark disc so the mark shows on any thumbnail colour.
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      selected ? Icons.delete : Icons.check_circle,
+                      size: 20,
+                      color: selected ? AppTheme.text : AppTheme.accent,
+                    ),
                   ),
                 ),
               ],
