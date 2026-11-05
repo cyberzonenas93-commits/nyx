@@ -21,8 +21,8 @@
 - Pause fix: `_buildFullContent` in the detail page auto-played on every rebuild, and every pause rebuilds it via `onPlayingStateChanged`, so pausing resumed at once. It now auto-plays once per controller (`_autoPlayedController`). Regression test: `integration_test/video_pause_test.dart`.
 
 ## Tests and gates
-- Unit tests (host, Dart cipher): `flutter test test/`. 73 pass. These include `vault_stream_server_test.dart` (ranges, tokens, tamper, stop).
-- Release gate (simulator, needs CryptoKit): `tool/sim-gate.sh integration_test/native_crypto_stream_test.dart integration_test/poster_backfill_test.dart integration_test/video_import_on_device_test.dart`.
+- Unit tests (host, Dart cipher): `flutter test test/`. 75 pass. These include `vault_stream_server_test.dart` (ranges, tokens, tamper, stop).
+- Release gate (simulator, needs CryptoKit): `tool/sim-gate.sh integration_test/native_crypto_stream_test.dart integration_test/duplicates_page_test.dart integration_test/video_pause_test.dart integration_test/poster_backfill_test.dart`. The duplicates test saves its screens to `gate-shots/` (via the Mac's `/tmp`).
   - Run it on the Mac from a tree that holds `.test_media/big_moov_end.mp4` and `poster_*.mp4` (made with ffmpeg; see that script's header).
   - It makes its own simulator (`.sim-udid`).
   - `native_crypto_stream_test` is the format-drift gate: native and Dart must stay interchangeable both ways, and tampering must fail.
@@ -30,6 +30,7 @@
 
 ## Release (Mac mini, `angelonartey@192.168.0.145`)
 - Tree: `git -c core.autocrlf=false archive HEAD | ssh mac 'tar -x -C ~/nyx-release'`, then `flutter pub get` and `pod install`.
-- Archive, export and upload: `~/nyx-release/archive.command`, opened in Terminal (keychain). It uses xcodebuild with `-allowProvisioningUpdates` and ASC key `R7BYLGVT9L`, and ExportOptions `destination upload`.
-- Store: `node asc-nyx-submit.cjs ~/medaase-build/qwen_asc.cjs`. It waits for the build, creates the version, attaches the build, sets What's New, checks the age-rating `socialMedia` answer and submits. The read-only check is `asc-nyx-status.cjs`. Copies are in `F:/LocalAI/release-nyx`.
-- Versions: 1.0.8 (17) was live, built from Mac-only source that is now lost. 1.0.9 (18) is built from main `f32b13a`, uploaded 2026-11-05 13:10 UTC and submitted the same day (review submission `e6b6169b-80d5-4eae-be46-23f361f95fc7`, WAITING_FOR_REVIEW). The age rating's `socialMedia` was answered false. Xcode warns that the iOS 13.0 target is too low and must be 15.0 from April 2027.
+- Archive: `~/nyx-release/archive.command`, opened in Terminal (keychain). It runs xcodebuild with `-allowProvisioningUpdates` and ASC key `R7BYLGVT9L`, then writes every bundle's version to `~/nyx-release/archive-bundles.txt`. It does not upload. Upload: `export.command` (ExportOptions `destination upload`).
+- Store: `node asc-nyx-submit.cjs ./qwen_asc.cjs [--dry]`. It waits for the build, attaches it to the version, sets What's New, checks the age-rating `socialMedia` answer and submits. A refused submission is resubmitted, or cancelled and replaced. `asc-nyx-cancel.cjs` cancels one submission; the read-only checks are `asc-nyx-status.cjs` and `asc-nyx-verify.cjs`. Copies are in `F:/LocalAI/release-nyx`.
+- Trap: build numbers repeat across version trains. Nyx has old 1.0.0 builds 18 and 19 (Xcode 16 SDK). Looking a build up by number alone attached those, and Apple refused both submissions with ITMS-90062 ("CFBundleShortVersionString [1.0.0] must be higher than 1.0.8"). Always filter `preReleaseVersion.version` too, and check the attached build with `asc-nyx-verify.cjs`. Apple's refusal reasons only come by email (cyberzonenas93@gmail.com).
+- Versions: 1.0.8 (17) was live, built from Mac-only source that is now lost. The first 1.0.9 submission (build 18, from `f32b13a`) went INVALID_BINARY because of the build-number trap above. 1.0.9 (19), from main `851e5ca`, was submitted 2026-11-05 22:36 UTC: review submission `0447b60a-11e4-43a2-8541-732b3d6ace45`, WAITING_FOR_REVIEW, build id `b41bf385-cb74-465a-87e6-ee62aea18eec`. The age rating's `socialMedia` was answered false. Xcode warns that the iOS 13.0 target is too low and must be 15.0 from April 2027.
