@@ -30,6 +30,9 @@ void main() {
     expect(fixture.existsSync(), isTrue, reason: 'push the fixture first');
     final source = await fixture.copy('${tmp.path}/pause_clip.mp4');
 
+    // Fresh vault: earlier gate tests leave items under other keys.
+    final vaultDir = Directory('${docs.path}/vault');
+    if (vaultDir.existsSync()) vaultDir.deleteSync(recursive: true);
     final vault = VaultService(EncryptionService());
     await vault.initialize(
         masterKey: Uint8List.fromList(List<int>.generate(32, (i) => 3 * i)));

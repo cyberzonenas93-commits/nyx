@@ -35,6 +35,9 @@ void main() {
       ..writeAsBytesSync(img.encodeJpg(img.Image(width: 640, height: 480)
         ..clear(img.ColorRgb8(46, 230, 166))));
 
+    // Fresh vault: earlier gate tests leave items under other keys.
+    final vaultDir = Directory('${docs.path}/vault');
+    if (vaultDir.existsSync()) vaultDir.deleteSync(recursive: true);
     final vault = VaultService(EncryptionService());
     await vault.initialize(
         masterKey: Uint8List.fromList(List<int>.generate(32, (i) => 90 + i)));

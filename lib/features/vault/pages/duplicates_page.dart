@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../app/theme.dart';
+import '../../../core/models/subscription_tier.dart';
 import '../../../core/models/vault_item.dart';
 import '../../../core/services/subscription_service.dart';
 import '../../../core/services/vault_service.dart';
