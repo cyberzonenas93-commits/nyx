@@ -38,7 +38,7 @@ void main() {
       final item = await vault.storeFileFromPath(
         sourceFilePath: copy.path,
         filename: f.path.split('/').last,
-        mimeType: 'video/mp4',
+        mimeType: f.path.endsWith('.webm') ? 'video/webm' : 'video/mp4',
         source: VaultItemSource.import,
         queueThumbnailGeneration: false,
         deduplicate: false,
@@ -65,7 +65,13 @@ void main() {
     } catch (_) {}
     for (var i = 0; i < ids.length; i++) {
       final p = vault.getThumbnailPath(ids[i]);
-      expect(p, isNotNull);
+      expect(p, isNotNull, reason: 'every video needs a poster');
+      final stored = vault.items.firstWhere((it) => it.id == ids[i]);
+      // iOS cannot decode VP9: that one gets the stand-in poster, the rest
+      // real frames.
+      expect(stored.metadata?['posterFallback'] == true,
+          stored.originalFilename.endsWith('.webm'),
+          reason: stored.originalFilename);
       expect(File(p!).lengthSync(), greaterThan(1000));
       try {
         File(p).copySync('${out.path}/poster_$i.jpg');

@@ -154,12 +154,14 @@ void main() {
     expect(encMs, lessThan(30000));
   });
 
-  testWidgets('import, instant stream playback, poster backfill', (tester) async {
+  for (final fixtureName in const <String>['nyx_test_fixture.mp4', 'nyx_test_fixture_hevc.mov']) {
+  testWidgets('import, instant stream playback, poster backfill: $fixtureName', (tester) async {
     final docs = await getApplicationDocumentsDirectory();
-    final fixture = File('${docs.path}/nyx_test_fixture.mp4');
+    final fixture = File('${docs.path}/$fixtureName');
+    final ext = fixtureName.split('.').last;
     expect(await fixture.exists(), isTrue,
         reason: 'push the fixture to Documents/nyx_test_fixture.mp4 first');
-    final source = File('${work.path}/clip.mp4');
+    final source = File('${work.path}/clip.$ext');
     await fixture.copy(source.path);
     final sizeMb = (await source.length()) / mib;
 
@@ -169,8 +171,8 @@ void main() {
     final sw = Stopwatch()..start();
     final item = await vault.storeFileFromPath(
       sourceFilePath: source.path,
-      filename: 'clip.mp4',
-      mimeType: 'video/mp4',
+      filename: 'clip.$ext',
+      mimeType: ext == 'mov' ? 'video/quicktime' : 'video/mp4',
       source: VaultItemSource.import,
       queueThumbnailGeneration: false,
       deduplicate: false,
@@ -214,6 +216,7 @@ void main() {
     // Poster backfill: lose the poster, let unlock-time backfill make it again
     // (over the stream, no decrypted copy needed).
     await vault.clearDecryptedCache(stopStreaming: false);
+    await vault.backfillMissingVideoThumbnails(); // let the unlock run finish
     final posterPath = vault.getThumbnailPathForItem(vault.items.firstWhere((i) => i.id == item.id))!;
     await File(posterPath).delete();
     final made = await vault.backfillMissingVideoThumbnails();
@@ -233,8 +236,9 @@ void main() {
         throwsA(isA<SocketException>()));
 
     // ignore: avoid_print
-    print('NYX_PERF video ${sizeMb.toStringAsFixed(1)} MiB: import ${importMs}ms, '
+    print('NYX_PERF $fixtureName ${sizeMb.toStringAsFixed(1)} MiB: import ${importMs}ms, '
         'stream ready ${readyMs}ms, first frame moving ${playingMs}ms, '
         'seek 80% ${seekMs}ms, old full decrypt ${fullDecryptMs}ms');
   });
+  }
 }

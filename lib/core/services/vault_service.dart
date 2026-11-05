@@ -40,6 +40,45 @@ Uint8List? _processImageThumbnail(Uint8List imageData) {
   return null;
 }
 
+/// Poster for a video the platform cannot decode (WebM/VP9 or AV1 on most
+/// iPhones): a dark card with a play mark and the format, so the tile still
+/// reads as a video instead of an empty or failed import.
+@visibleForTesting
+Uint8List drawFallbackVideoPoster(String label) {
+  const w = 320, h = 180;
+  final image = img.Image(width: w, height: h);
+  for (var y = 0; y < h; y++) {
+    final t = y / h;
+    img.fillRect(image,
+        x1: 0,
+        y1: y,
+        x2: w - 1,
+        y2: y,
+        color: img.ColorRgb8((0x16 + 0x12 * t).round(),
+            (0x16 + 0x0A * t).round(), (0x20 + 0x18 * t).round()));
+  }
+  img.fillCircle(image,
+      x: w ~/ 2,
+      y: h ~/ 2 - 12,
+      radius: 36,
+      color: img.ColorRgba8(255, 255, 255, 46),
+      antialias: true);
+  img.fillPolygon(image,
+      vertices: <img.Point>[
+        img.Point(w / 2 - 11, h / 2 - 33),
+        img.Point(w / 2 - 11, h / 2 + 9),
+        img.Point(w / 2 + 23, h / 2 - 12),
+      ],
+      color: img.ColorRgb8(236, 236, 242));
+  final text = label.toUpperCase();
+  img.drawString(image, text,
+      font: img.arial24,
+      x: (w - text.length * 14) ~/ 2,
+      y: h - 46,
+      color: img.ColorRgb8(196, 196, 208));
+  return Uint8List.fromList(img.encodeJpg(image, quality: 82));
+}
+
 class _SingleDigestSink implements Sink<Digest> {
   Digest? digest;
 
@@ -2940,8 +2979,12 @@ class VaultService extends ChangeNotifier {
     // For bulk imports, callers can disable this and explicitly generate thumbnails in a controlled manner.
     // Videos always get a poster: if the source-side attempt failed (or was
     // skipped for a huge file), read it from the stored copy over the stream.
-    if ((queueThumbnailGeneration || fileType == VaultItemType.video) &&
-        initialThumbnailPath == null) {
+    if (fileType == VaultItemType.video && initialThumbnailPath == null) {
+      unawaited(generateThumbnailForItem(fileId).catchError((Object e) {
+        debugPrint('[VaultService] Poster from stored copy failed: $e');
+        return null;
+      }));
+    } else if (queueThumbnailGeneration && initialThumbnailPath == null) {
       _enqueueThumbnailGeneration(
               () => _generateThumbnailAsync(fileId, destPath, fileType, null))
           .then((generatedThumbnailPath) {
@@ -3425,9 +3468,20 @@ class VaultService extends ChangeNotifier {
       if (item.type != VaultItemType.video) continue;
       if (_posterBackfillFailed.contains(item.id)) continue;
       final existing = getThumbnailPathForItem(item);
-      if (existing != null && await File(existing).exists()) continue;
+      final hasPoster = existing != null && await File(existing).exists();
+      // A stand-in poster on a container AVFoundation normally decodes may be
+      // from a one-off failure: try for a real frame again once per unlock.
+      final retryFallback = hasPoster &&
+          item.metadata?['posterFallback'] == true &&
+          const <String>{'mp4', 'mov', 'm4v', '3gp'}
+              .contains((item.extension ?? '').toLowerCase());
+      if (hasPoster && !retryFallback) continue;
       final path = await generateThumbnailForItem(item.id,
           forceRegenerate: existing != null);
+      if (retryFallback) {
+        _posterBackfillFailed.add(item.id);
+        continue;
+      }
       if (path != null) {
         made++;
       } else {
@@ -3796,13 +3850,41 @@ class VaultService extends ChangeNotifier {
 
     // _generateThumbnail handles encrypted items by materializing a temp copy
     // when a native decoder needs a plaintext path.
-    final thumbnailPath = await _enqueueThumbnailGeneration(
+    var thumbnailPath = await _enqueueThumbnailGeneration(
       () => _generateThumbnail(itemId, filePath, item.type, null),
     );
+    var usedFallback = false;
+    if (thumbnailPath == null &&
+        item.type == VaultItemType.video &&
+        _thumbnailsDirectory != null) {
+      // No decodable frame: still give the video a poster. Flagged in metadata
+      // so a later decoder can find and replace these.
+      try {
+        final name = '${itemId}_thumb.jpg';
+        await File('${_thumbnailsDirectory!.path}/$name').writeAsBytes(
+            drawFallbackVideoPoster(
+                (item.extension ?? 'video').toUpperCase()));
+        thumbnailPath = 'thumbnails/$name';
+        usedFallback = true;
+      } catch (e) {
+        debugPrint('[VaultService] Fallback poster failed for $itemId: $e');
+      }
+    }
 
     if (thumbnailPath != null) {
-      // Update item with thumbnail path
-      _items[itemIndex] = item.copyWith(thumbnailPath: thumbnailPath);
+      // Update item with thumbnail path (look it up again: the poster step
+      // awaited, so the list may have changed).
+      final currentIndex = _items.indexWhere((i) => i.id == itemId);
+      if (currentIndex < 0) return thumbnailPath;
+      final current = _items[currentIndex];
+      final metadata = Map<String, dynamic>.from(current.metadata ?? const {});
+      if (usedFallback) {
+        metadata['posterFallback'] = true;
+      } else {
+        metadata.remove('posterFallback');
+      }
+      _items[currentIndex] =
+          current.copyWith(thumbnailPath: thumbnailPath, metadata: metadata);
       _scheduleIndexSave();
       notifyListeners();
       debugPrint(
