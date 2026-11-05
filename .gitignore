@@ -55,3 +55,9 @@ app.*.map.json
 /ios/.symlinks/
 /macos/build/
 .test_media/
+
+# Simulator gate state
+.sim-udid
+gate-*.log
+sim-gate*.log
+pod-install.log

@@ -341,6 +341,8 @@ class VaultService extends ChangeNotifier {
   // for an old session stops; failures are not retried within a session.
   int _posterBackfillGeneration = 0;
   final Set<String> _posterBackfillFailed = <String>{};
+  Future<int>? _activePosterBackfill;
+  int _activePosterBackfillGeneration = -1;
 
   Future<String> _computeSha256ForFilePath(String filePath) async {
     final file = File(filePath);
@@ -3394,7 +3396,22 @@ class VaultService extends ChangeNotifier {
   /// Generates posters for every video that has none, or whose poster file is
   /// gone, one at a time. Runs after unlock; stops on lock or vault switch.
   /// Returns how many posters were made.
-  Future<int> backfillMissingVideoThumbnails() async {
+  /// A call while a run for the same session is active joins that run.
+  Future<int> backfillMissingVideoThumbnails() {
+    final active = _activePosterBackfill;
+    if (active != null && _activePosterBackfillGeneration == _posterBackfillGeneration) {
+      return active;
+    }
+    final run = _runPosterBackfill();
+    _activePosterBackfill = run;
+    _activePosterBackfillGeneration = _posterBackfillGeneration;
+    run.whenComplete(() {
+      if (identical(_activePosterBackfill, run)) _activePosterBackfill = null;
+    }).ignore();
+    return run;
+  }
+
+  Future<int> _runPosterBackfill() async {
     final generation = _posterBackfillGeneration;
     // Let the vault grid render first.
     await Future<void>.delayed(const Duration(seconds: 2));
