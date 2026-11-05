@@ -27,4 +27,4 @@
 - Tree: `git -c core.autocrlf=false archive HEAD | ssh mac 'tar -x -C ~/nyx-release'`, then `flutter pub get` and `pod install`.
 - Archive, export and upload: `~/nyx-release/archive.command`, opened in Terminal (keychain). It uses xcodebuild with `-allowProvisioningUpdates` and ASC key `R7BYLGVT9L`, and ExportOptions `destination upload`.
 - Store: `node asc-nyx-submit.cjs ~/medaase-build/qwen_asc.cjs`. It waits for the build, creates the version, attaches the build, sets What's New, checks the age-rating `socialMedia` answer and submits. The read-only check is `asc-nyx-status.cjs`. Copies are in `F:/LocalAI/release-nyx`.
-- Versions: 1.0.8 (17) was live, built from Mac-only source that is now lost; 1.0.9 (18) is built from main.
+- Versions: 1.0.8 (17) was live, built from Mac-only source that is now lost. 1.0.9 (18) is built from main `f32b13a`, uploaded 2026-11-05 13:10 UTC and submitted the same day (review submission `e6b6169b-80d5-4eae-be46-23f361f95fc7`, WAITING_FOR_REVIEW). The age rating's `socialMedia` was answered false. Xcode warns that the iOS 13.0 target is too low and must be 15.0 from April 2027.
