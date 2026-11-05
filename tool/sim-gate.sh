@@ -25,9 +25,8 @@ for t in "$@"; do
     sleep 1
   done
   wait $PID; echo "exit $?"
-  # Tests save screens to Documents/gate_shots/; collect them.
-  C=$(xcrun simctl get_app_container "$UDID" com.angelonartey.nyx data 2>/dev/null)
-  if [ -d "$C/Documents/gate_shots" ]; then mkdir -p gate-shots; mv "$C"/Documents/gate_shots/*.png gate-shots/ 2>/dev/null; fi
+  # Tests save screens to /tmp/nyx-gate-shots/ (the simulator shares the Mac's /tmp).
+  if [ -d /tmp/nyx-gate-shots ]; then mkdir -p gate-shots; mv /tmp/nyx-gate-shots/*.png gate-shots/ 2>/dev/null; fi
   grep -E "NYX_PERF|All tests passed|Some tests failed|\[E\]|Expected|Actual|Error" "gate-$(basename $t .dart).log" | head -40
 done
 echo GATE_DONE

@@ -3,7 +3,7 @@
 // Duplicates page, deletes the preselected copies and checks one of each stays.
 //
 // Fixtures: Documents/poster_*.mp4 (sim-gate.sh pushes them). Screens are
-// saved to Documents/gate_shots/ and copied to gate-shots/ by sim-gate.sh.
+// saved to /tmp/nyx-gate-shots/ and moved to gate-shots/ by sim-gate.sh.
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -115,16 +115,19 @@ void main() {
 
 final _shotKey = GlobalKey();
 
-/// Saves what the page shows to Documents/gate_shots/<name>.png;
-/// tool/sim-gate.sh copies those into gate-shots/ after the run.
+/// Saves what the page shows to /tmp/nyx-gate-shots/<name>.png. A simulator
+/// app can write the Mac's /tmp; tool/sim-gate.sh moves the files to
+/// gate-shots/. On a device the write fails and is ignored.
 Future<void> _shot(WidgetTester tester, Directory docs, String name) async {
   await tester.runAsync(() async {
     final boundary =
         _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await boundary.toImage(pixelRatio: 3);
     final png = await image.toByteData(format: ui.ImageByteFormat.png);
-    File('${docs.path}/gate_shots/$name.png')
-      ..createSync(recursive: true)
-      ..writeAsBytesSync(png!.buffer.asUint8List());
+    try {
+      File('/tmp/nyx-gate-shots/$name.png')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(png!.buffer.asUint8List());
+    } catch (_) {}
   });
 }
