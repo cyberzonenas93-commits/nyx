@@ -3,6 +3,226 @@ import UIKit
 import AVFoundation
 import AVKit
 import AVFAudio
+import CryptoKit
+
+/// Vault file encryption with CryptoKit, byte-compatible with the Dart
+/// VaultCipher format:
+///   [0x01] then chunks of [12-byte nonce][ciphertext][16-byte tag],
+///   1 MiB of plaintext per chunk (last one shorter; an empty file is one
+///   empty chunk), AAD = aadPrefix(8) || chunkIndex as 4 bytes big-endian.
+/// Dart derives the per-file key and the AAD prefix and passes them in.
+enum VaultCrypto {
+  static let versionByte: UInt8 = 0x01
+  static let chunkSize = 1024 * 1024
+  static let nonceLength = 12
+  static let tagLength = 16
+  static let chunkOnDisk = 12 + 1024 * 1024 + 16
+  private static let queue = DispatchQueue(label: "com.angelonartey.nyx.vaultcrypto", qos: .userInitiated, attributes: .concurrent)
+
+  struct Failure: Error {
+    let code: String
+    let message: String
+  }
+
+  static func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard let args = call.arguments as? [String: Any],
+          let src = args["src"] as? String,
+          let keyData = (args["key"] as? FlutterStandardTypedData)?.data,
+          let prefix = (args["aadPrefix"] as? FlutterStandardTypedData)?.data,
+          keyData.count == 32, prefix.count == 8 else {
+      result(FlutterError(code: "INVALID_ARGS", message: "src, 32-byte key and 8-byte aadPrefix are required", details: nil))
+      return
+    }
+    let key = SymmetricKey(data: keyData)
+    queue.async {
+      var reply: Any? = nil
+      do {
+        switch call.method {
+        case "encryptFile":
+          guard let dst = args["dst"] as? String else { throw Failure(code: "INVALID_ARGS", message: "dst is required") }
+          let (bytes, digest) = try encryptFile(src: src, dst: dst, key: key, prefix: prefix, hash: (args["computeSha256"] as? Bool) ?? false)
+          var map: [String: Any] = ["bytes": bytes]
+          if let digest = digest { map["sha256"] = digest }
+          reply = map
+        case "decryptFile":
+          guard let dst = args["dst"] as? String else { throw Failure(code: "INVALID_ARGS", message: "dst is required") }
+          reply = try decryptFile(src: src, dst: dst, key: key, prefix: prefix)
+        case "decryptChunks":
+          let first = (args["first"] as? Int) ?? 0
+          let count = (args["count"] as? Int) ?? 1
+          reply = FlutterStandardTypedData(bytes: try decryptChunks(src: src, key: key, prefix: prefix, first: first, count: count))
+        default:
+          reply = FlutterMethodNotImplemented
+        }
+      } catch let failure as Failure {
+        reply = FlutterError(code: failure.code, message: failure.message, details: nil)
+      } catch {
+        reply = FlutterError(code: "CRYPTO", message: "\(error)", details: nil)
+      }
+      DispatchQueue.main.async { result(reply) }
+    }
+  }
+
+  private static func aad(_ prefix: Data, _ index: Int) -> Data {
+    var data = prefix
+    data.append(contentsOf: [UInt8((index >> 24) & 0xFF), UInt8((index >> 16) & 0xFF), UInt8((index >> 8) & 0xFF), UInt8(index & 0xFF)])
+    return data
+  }
+
+  private static func ioFailure(_ what: String) -> Failure {
+    Failure(code: "IO", message: "\(what): \(String(cString: strerror(errno)))")
+  }
+
+  private static func writeAll(_ fd: Int32, _ data: Data) throws {
+    try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+      guard var ptr = raw.baseAddress else { return }
+      var left = raw.count
+      while left > 0 {
+        let n = write(fd, ptr, left)
+        if n < 0 {
+          if errno == EINTR { continue }
+          throw ioFailure("write")
+        }
+        left -= n
+        ptr += n
+      }
+    }
+  }
+
+  /// Reads up to [count] bytes at [offset]; short only at end of file.
+  private static func readAt(_ fd: Int32, _ offset: Int, _ count: Int) throws -> Data {
+    var buffer = Data(count: count)
+    var filled = 0
+    try buffer.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) in
+      while filled < count {
+        let n = pread(fd, raw.baseAddress! + filled, count - filled, off_t(offset + filled))
+        if n < 0 {
+          if errno == EINTR { continue }
+          throw ioFailure("read")
+        }
+        if n == 0 { break }
+        filled += n
+      }
+    }
+    if filled < count { buffer.removeSubrange(filled..<count) }
+    return buffer
+  }
+
+  private static func open(_ chunk: Data, key: SymmetricKey, prefix: Data, index: Int) throws -> Data {
+    guard chunk.count >= nonceLength + tagLength else {
+      throw Failure(code: "FORMAT", message: "Truncated chunk \(index)")
+    }
+    do {
+      let box = try AES.GCM.SealedBox(
+        nonce: AES.GCM.Nonce(data: chunk.prefix(nonceLength)),
+        ciphertext: chunk.dropFirst(nonceLength).dropLast(tagLength),
+        tag: chunk.suffix(tagLength))
+      return try AES.GCM.open(box, using: key, authenticating: aad(prefix, index))
+    } catch {
+      throw Failure(code: "AUTH_FAILED", message: "Authentication failed for chunk \(index)")
+    }
+  }
+
+  private static func checkVersion(_ fd: Int32) throws {
+    let first = try readAt(fd, 0, 1)
+    guard first.first == versionByte else {
+      throw Failure(code: "FORMAT", message: "Unsupported version byte")
+    }
+  }
+
+  static func encryptFile(src: String, dst: String, key: SymmetricKey, prefix: Data, hash: Bool) throws -> (Int, String?) {
+    let input = Darwin.open(src, O_RDONLY)
+    guard input >= 0 else { throw ioFailure("open source") }
+    defer { close(input) }
+    let output = Darwin.open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+    guard output >= 0 else { throw ioFailure("open destination") }
+    var ok = false
+    defer {
+      close(output)
+      if !ok { unlink(dst) }
+    }
+    try writeAll(output, Data([versionByte]))
+    var hasher = SHA256()
+    var index = 0
+    var total = 0
+    while true {
+      let plain = try autoreleasepool { () -> Data in
+        let chunk = try readAt(input, total, chunkSize)
+        if chunk.isEmpty && index > 0 { return chunk }
+        if hash { hasher.update(data: chunk) }
+        let box = try AES.GCM.seal(chunk, using: key, nonce: AES.GCM.Nonce(), authenticating: aad(prefix, index))
+        var out = Data(capacity: nonceLength + chunk.count + tagLength)
+        box.nonce.withUnsafeBytes { out.append(contentsOf: $0) }
+        out.append(box.ciphertext)
+        out.append(box.tag)
+        try writeAll(output, out)
+        return chunk
+      }
+      if plain.isEmpty && index > 0 { break }
+      total += plain.count
+      index += 1
+      if plain.count < chunkSize { break }
+    }
+    guard fsync(output) == 0 else { throw ioFailure("fsync") }
+    ok = true
+    let digest = hash ? hasher.finalize().map { String(format: "%02x", $0) }.joined() : nil
+    return (total, digest)
+  }
+
+  static func decryptFile(src: String, dst: String, key: SymmetricKey, prefix: Data) throws -> Int {
+    let input = Darwin.open(src, O_RDONLY)
+    guard input >= 0 else { throw ioFailure("open source") }
+    defer { close(input) }
+    var info = stat()
+    guard fstat(input, &info) == 0 else { throw ioFailure("stat") }
+    let size = Int(info.st_size)
+    try checkVersion(input)
+    let output = Darwin.open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+    guard output >= 0 else { throw ioFailure("open destination") }
+    var ok = false
+    defer {
+      close(output)
+      if !ok { unlink(dst) }
+    }
+    var index = 0
+    var total = 0
+    var offset = 1
+    while offset < size {
+      try autoreleasepool {
+        let chunk = try readAt(input, offset, min(chunkOnDisk, size - offset))
+        let plain = try open(chunk, key: key, prefix: prefix, index: index)
+        try writeAll(output, plain)
+        total += plain.count
+        offset += chunk.count
+        index += 1
+      }
+    }
+    ok = true
+    return total
+  }
+
+  static func decryptChunks(src: String, key: SymmetricKey, prefix: Data, first: Int, count: Int) throws -> Data {
+    let input = Darwin.open(src, O_RDONLY)
+    guard input >= 0 else { throw ioFailure("open source") }
+    defer { close(input) }
+    var info = stat()
+    guard fstat(input, &info) == 0 else { throw ioFailure("stat") }
+    let size = Int(info.st_size)
+    try checkVersion(input)
+    var out = Data(capacity: max(0, count) * chunkSize)
+    var index = max(0, first)
+    while index < first + count {
+      let offset = 1 + index * chunkOnDisk
+      if offset >= size { break }
+      try autoreleasepool {
+        let chunk = try readAt(input, offset, min(chunkOnDisk, size - offset))
+        out.append(try open(chunk, key: key, prefix: prefix, index: index))
+      }
+      index += 1
+    }
+    return out
+  }
+}
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -119,6 +339,13 @@ import AVFAudio
       } else {
         result(FlutterMethodNotImplemented)
       }
+    }
+
+    // Hardware AES-GCM for vault files. Same on-disk format as the Dart
+    // VaultCipher (lib/core/services/vault_cipher.dart); see NativeVaultCrypto.
+    let vaultCryptoChannel = FlutterMethodChannel(name: "com.angelonartey.nyx/vault_crypto", binaryMessenger: messenger)
+    vaultCryptoChannel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
+      VaultCrypto.handle(call, result: result)
     }
 
     let backgroundExecutionChannel = FlutterMethodChannel(name: "com.nyx.app/background_execution", binaryMessenger: messenger)
