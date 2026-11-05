@@ -164,6 +164,46 @@ Future<void> _decryptVaultFileInWorker(_VaultFileCryptoParams params) async {
   );
 }
 
+/// Dart fallback for [NativeVaultCrypto.plainSha256]: plaintext SHA-256 of an
+/// encrypted vault file, decrypted in memory 8 chunks at a time.
+Future<String> _plainSha256InWorker(_VaultFileCryptoParams params) async {
+  final cipher = VaultCipher(EncryptionService());
+  final file = File(params.sourcePath);
+  final length = await file.length();
+  final raf = await file.open();
+  final digestSink = _SingleDigestSink();
+  final input = sha256.startChunkedConversion(digestSink);
+  try {
+    for (var i = 0; VaultCipher.cipherOffsetOfChunk(i) < length; i += 8) {
+      input.add(await cipher.decryptChunkRange(
+        masterKey: params.masterKey,
+        fileId: params.fileId,
+        raf: raf,
+        fileLength: length,
+        firstChunk: i,
+        count: 8,
+      ));
+    }
+  } finally {
+    await raf.close();
+  }
+  input.close();
+  return digestSink.digest!.toString();
+}
+
+/// Vault items with identical content (same plaintext SHA-256), oldest first.
+/// A cleanup keeps [items].first.
+@immutable
+class DuplicateGroup {
+  final String sha256Digest;
+  final List<VaultItem> items;
+
+  const DuplicateGroup(this.sha256Digest, this.items);
+
+  /// Bytes freed by deleting every copy but the oldest.
+  int get wastedBytes => items.skip(1).fold(0, (sum, i) => sum + i.sizeBytes);
+}
+
 Future<void> _copyVaultFileInWorker(_VaultFileCopyParams params) async {
   final source = File(params.sourcePath);
   final dest = File(params.destPath);
@@ -515,15 +555,21 @@ class VaultService extends ChangeNotifier {
     }
   }
 
-  Future<String?> _ensureItemSha256(VaultItem item) async {
+  /// Plaintext SHA-256 of [item], from metadata or computed and cached.
+  /// Encrypted items are hashed only when [decryptIfNeeded] (the duplicate
+  /// finder): import-time dedup stays cheap and returns null for them.
+  Future<String?> _ensureItemSha256(VaultItem item,
+      {bool decryptIfNeeded = false}) async {
     final existing = _getItemSha256(item);
     if (existing != null) return existing;
 
     // Dedup compares against the *plaintext* digest recorded at import time.
     // Hashing an encrypted item's on-disk bytes would digest ciphertext with a
     // random per-chunk nonce — a value that can never match, and which would
-    // then be cached into metadata permanently. Leave it null instead.
-    if (_isItemEncrypted(item)) return null;
+    // then be cached into metadata permanently. Decrypt first or return null.
+    final encrypted = _isItemEncrypted(item);
+    final masterKey = _currentMasterKey;
+    if (encrypted && (!decryptIfNeeded || masterKey == null)) return null;
 
     final filePath = _resolveVaultFilePathForItem(item);
     if (filePath == null) return null;
@@ -531,7 +577,22 @@ class VaultService extends ChangeNotifier {
     if (!await file.exists()) return null;
 
     try {
-      final digest = await _computeSha256ForFilePath(filePath);
+      final digest = encrypted
+          ? await NativeVaultCrypto.plainSha256(
+                sourcePath: filePath,
+                fileKey: _cipher.deriveFileKey(masterKey!, item.id),
+                fileId: item.id,
+              ) ??
+              await compute(
+                _plainSha256InWorker,
+                _VaultFileCryptoParams(
+                  masterKey: Uint8List.fromList(masterKey),
+                  fileId: item.id,
+                  sourcePath: filePath,
+                  destPath: '',
+                ),
+              )
+          : await _computeSha256ForFilePath(filePath);
       final idx = _items.indexWhere((i) => i.id == item.id);
       if (idx >= 0) {
         final current = _items[idx];
@@ -4000,48 +4061,63 @@ class VaultService extends ChangeNotifier {
     return true;
   }
 
-  /// Scan the vault and delete duplicate items (exact SHA-256 match).
-  /// Keeps the earliest-added item by default.
-  Future<int> removeDuplicates({
-    void Function(int current, int total, String status)? onProgress,
-    bool keepOldest = true,
+  /// Finds sets of vault items with identical content. Only items that share
+  /// a byte size are hashed, so a scan reads few files; digests are cached in
+  /// metadata, so the next scan is instant. Nothing is deleted here.
+  /// Groups come back largest saving first, each oldest first.
+  Future<List<DuplicateGroup>> findDuplicateGroups({
+    void Function(int done, int total)? onProgress,
   }) async {
-    if (!_isInitialized) return 0;
+    if (!_isInitialized) return const [];
 
-    final items = List<VaultItem>.from(_items);
-    items.sort((a, b) => keepOldest
-        ? a.dateAdded.compareTo(b.dateAdded)
-        : b.dateAdded.compareTo(a.dateAdded));
+    final bySize = <int, List<VaultItem>>{};
+    for (final item in _items) {
+      if (item.sizeBytes <= 0) continue;
+      (bySize[item.sizeBytes] ??= <VaultItem>[]).add(item);
+    }
+    final candidates = [
+      for (final sameSize in bySize.values)
+        if (sameSize.length > 1) ...sameSize,
+    ];
 
-    final seen = <String, String>{}; // sha256 -> kept itemId
-    final toDelete = <String>[];
+    final byDigest = <String, List<VaultItem>>{};
+    for (var i = 0; i < candidates.length; i++) {
+      onProgress?.call(i, candidates.length);
+      final item = candidates[i];
+      // Null for a missing or damaged file: it is just not matched.
+      final digest = await _ensureItemSha256(item, decryptIfNeeded: true);
+      if (digest != null) (byDigest[digest] ??= <VaultItem>[]).add(item);
+    }
+    onProgress?.call(candidates.length, candidates.length);
 
-    for (int i = 0; i < items.length; i++) {
-      final item = items[i];
-      onProgress?.call(i + 1, items.length, 'Checking ${item.displayName}...');
+    return [
+      for (final entry in byDigest.entries)
+        if (entry.value.length > 1)
+          DuplicateGroup(
+            entry.key,
+            entry.value..sort((a, b) => a.dateAdded.compareTo(b.dateAdded)),
+          ),
+    ]..sort((a, b) => b.wastedBytes.compareTo(a.wastedBytes));
+  }
 
-      final digest = await _ensureItemSha256(item);
-      if (digest == null) continue;
-
-      final existingKept = seen[digest];
-      if (existingKept == null) {
-        seen[digest] = item.id;
-      } else {
-        toDelete.add(item.id);
+  /// Deletes [copyId], a duplicate of [keptId], after giving [keptId] the
+  /// copy's folder and album memberships, so removing a copy never takes the
+  /// file out of a folder or album.
+  Future<bool> deleteDuplicateCopy(String copyId,
+      {required String keptId}) async {
+    if (!_isInitialized || copyId == keptId) return false;
+    if (!_items.any((i) => i.id == keptId)) return false;
+    for (final folder in List<VaultFolder>.from(_folders)) {
+      if (folder.itemIds.contains(copyId)) {
+        await addItemToFolder(keptId, folder.id);
       }
     }
-
-    int removed = 0;
-    for (int i = 0; i < toDelete.length; i++) {
-      final id = toDelete[i];
-      onProgress?.call(i + 1, toDelete.length,
-          'Deleting duplicate ${i + 1} / ${toDelete.length}...');
-      final ok = await deleteItem(id);
-      if (ok) removed++;
+    for (final album in List<Album>.from(_albums)) {
+      if (!album.id.startsWith('smart_') && album.itemIds.contains(copyId)) {
+        await addItemToAlbum(keptId, album.id);
+      }
     }
-
-    onProgress?.call(removed, removed, 'Removed $removed duplicate(s)');
-    return removed;
+    return deleteItem(copyId);
   }
 
   /// Remove custom name (revert to original)

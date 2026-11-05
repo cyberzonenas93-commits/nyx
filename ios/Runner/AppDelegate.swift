@@ -47,6 +47,8 @@ enum VaultCrypto {
         case "decryptFile":
           guard let dst = args["dst"] as? String else { throw Failure(code: "INVALID_ARGS", message: "dst is required") }
           reply = try decryptFile(src: src, dst: dst, key: key, prefix: prefix)
+        case "plainSha256":
+          reply = try plainSha256(src: src, key: key, prefix: prefix)
         case "decryptChunks":
           let first = (args["first"] as? Int) ?? 0
           let count = (args["count"] as? Int) ?? 1
@@ -199,6 +201,30 @@ enum VaultCrypto {
     }
     ok = true
     return total
+  }
+
+  /// Lowercase hex SHA-256 of the plaintext, decrypted chunk by chunk in memory;
+  /// nothing is written to disk. Used to find duplicate vault files.
+  static func plainSha256(src: String, key: SymmetricKey, prefix: Data) throws -> String {
+    let input = Darwin.open(src, O_RDONLY)
+    guard input >= 0 else { throw ioFailure("open source") }
+    defer { close(input) }
+    var info = stat()
+    guard fstat(input, &info) == 0 else { throw ioFailure("stat") }
+    let size = Int(info.st_size)
+    try checkVersion(input)
+    var hasher = SHA256()
+    var index = 0
+    var offset = 1
+    while offset < size {
+      try autoreleasepool {
+        let chunk = try readAt(input, offset, min(chunkOnDisk, size - offset))
+        hasher.update(data: try open(chunk, key: key, prefix: prefix, index: index))
+        offset += chunk.count
+        index += 1
+      }
+    }
+    return hasher.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
   static func decryptChunks(src: String, key: SymmetricKey, prefix: Data, first: Int, count: Int) throws -> Data {

@@ -24,6 +24,14 @@ for t in "$@"; do
     if [ -n "$C" ]; then mkdir -p "$C/Documents"; [ -f "$C/Documents/nyx_test_fixture.mp4" ] || cp .test_media/big_moov_end.mp4 "$C/Documents/nyx_test_fixture.mp4"; cp .test_media/poster_* "$C/Documents/" 2>/dev/null; [ -f .test_media/hevc_moov_end.mov ] && cp .test_media/hevc_moov_end.mov "$C/Documents/nyx_test_fixture_hevc.mov"; break; fi
     sleep 1
   done
+  # A test prints "NYX_SHOT <name>" and holds the screen; save it to gate-shots/.
+  SHOTS=0
+  while kill -0 $PID 2>/dev/null; do
+    for s in $(grep -ao "NYX_SHOT [A-Za-z0-9_-]*" "gate-$(basename $t .dart).log" | awk '{print $2}' | tail -n +$((SHOTS+1))); do
+      mkdir -p gate-shots; xcrun simctl io "$UDID" screenshot "gate-shots/$s.png" >/dev/null 2>&1; SHOTS=$((SHOTS+1))
+    done
+    sleep 0.5
+  done
   wait $PID; echo "exit $?"
   grep -E "NYX_PERF|All tests passed|Some tests failed|\[E\]|Expected|Actual|Error" "gate-$(basename $t .dart).log" | head -40
 done

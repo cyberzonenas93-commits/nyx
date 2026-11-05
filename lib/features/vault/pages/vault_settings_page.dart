@@ -14,6 +14,7 @@ import '../../../features/subscription/pages/paywall_page.dart';
 import '../../../features/unlock/pages/pin_setup_page.dart';
 import '../../settings/pages/security_page.dart';
 import '../../../core/services/multi_vault_service.dart';
+import 'duplicates_page.dart';
 import 'vault_management_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/simple_video_import_service.dart';
@@ -566,6 +567,36 @@ class _VaultSettingsPageState extends State<VaultSettingsPage> {
             title: 'Storage',
             children: [
               _StorageSettingsTile(),
+              const Divider(height: 1),
+              Selector<SubscriptionService, bool>(
+                selector: (_, s) => s.currentTier.isUnlimited || s.isInTrial,
+                builder: (context, hasPremium, _) => ListTile(
+                  key: const Key('settings_remove_duplicates'),
+                  leading:
+                      const Icon(Icons.copy_all_outlined, color: AppTheme.accent),
+                  title: const Text(
+                    'Remove Duplicates',
+                    style: TextStyle(
+                      color: AppTheme.text,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  subtitle: Text(
+                    hasPremium
+                        ? 'Find files stored more than once and free up space'
+                        : 'Premium: find files stored more than once',
+                    style: TextStyle(
+                      color: AppTheme.text.withOpacity(0.6),
+                      fontSize: 12,
+                    ),
+                  ),
+                  trailing: Icon(
+                    hasPremium ? Icons.chevron_right : Icons.lock_outline,
+                    color: AppTheme.text.withOpacity(0.4),
+                  ),
+                  onTap: () => DuplicatesPage.open(context),
+                ),
+              ),
               const Divider(height: 1),
               ListTile(
                 leading:
