@@ -16,6 +16,7 @@ import 'package:nyx/app/theme.dart';
 import 'package:nyx/core/models/vault_item.dart';
 import 'package:nyx/core/services/encryption_service.dart';
 import 'package:nyx/core/services/media_playback_manager.dart';
+import 'package:nyx/core/services/subscription_service.dart';
 import 'package:nyx/core/services/vault_service.dart';
 import 'package:nyx/features/vault/pages/vault_item_detail_page.dart';
 import 'package:nyx/features/vault/widgets/video_player_widget.dart';
@@ -52,6 +53,8 @@ void main() {
         ChangeNotifierProvider<VaultService>.value(value: vault),
         ChangeNotifierProvider<MediaPlaybackManager>(
             create: (_) => MediaPlaybackManager()),
+        ChangeNotifierProvider<SubscriptionService>(
+            create: (_) => SubscriptionService()),
       ],
       child: MaterialApp(
         theme: AppTheme.darkTheme,

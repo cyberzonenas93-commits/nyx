@@ -2,8 +2,8 @@
 // once (encrypted, no cached digests, as videos are imported), opens the
 // Duplicates page, deletes the preselected copies and checks one of each stays.
 //
-// Fixtures: Documents/poster_*.mp4 (sim-gate.sh pushes them). Prints
-// NYX_SHOT <name> where sim-gate.sh takes a simulator screenshot.
+// Fixtures: Documents/poster_*.mp4 (sim-gate.sh pushes them). Screens are
+// saved to gate-shots/ through Documents/nyx_shot_<name> requests.
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -81,11 +81,7 @@ void main() {
         reason: '2 extra videos + 1 extra photo are preselected');
     expect(find.text('Keep'), findsNWidgets(2));
 
-    await tester.runAsync(() async {
-      // ignore: avoid_print
-      print('NYX_SHOT duplicates_found');
-      await Future<void>.delayed(const Duration(seconds: 4));
-    });
+    await tester.runAsync(() => _holdForScreenshot(docs, 'duplicates_found'));
 
     // Tapping a kept copy while it is the last one must not select it.
     await tester.tap(find.text('Keep').first);
@@ -105,12 +101,19 @@ void main() {
     expect(vault.items.length, before - 3);
     expect(vault.items.map((i) => i.id), containsAll([v1.id, p1.id]));
 
-    await tester.runAsync(() async {
-      // ignore: avoid_print
-      print('NYX_SHOT duplicates_done');
-      await Future<void>.delayed(const Duration(seconds: 4));
-    });
+    await tester.runAsync(() => _holdForScreenshot(docs, 'duplicates_done'));
     // ignore: avoid_print
     print('NYX_PERF duplicate scan of ${vault.items.length + 3} items: ${scanMs}ms');
   });
+}
+
+/// Asks tool/sim-gate.sh for a simulator screenshot: it watches for
+/// Documents/nyx_shot_<name>, takes the shot and deletes the file. Waits for
+/// that (20 s at most) so the screen stays put while it is taken.
+Future<void> _holdForScreenshot(Directory docs, String name) async {
+  final request = File('${docs.path}/nyx_shot_$name')..writeAsStringSync('');
+  for (var i = 0; i < 80 && request.existsSync(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  await Future<void>.delayed(const Duration(milliseconds: 300));
 }
