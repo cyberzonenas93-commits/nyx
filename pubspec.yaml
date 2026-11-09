@@ -1,7 +1,7 @@
 name: nyx
 description: Nyx - A local-first media privacy vault app
 publish_to: 'none'
-version: 1.0.9+20
+version: 1.0.9+21
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

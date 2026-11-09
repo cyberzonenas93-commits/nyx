@@ -892,9 +892,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
     if (Platform.isAndroid) {
       return 'Local storage (Android)';
     }
-    if (_useICloudStorage == null) {
-      return 'Local storage with encrypted iCloud backup if available';
-    } else if (_useICloudStorage == true) {
+    if (_useICloudStorage == true) {
       return 'Local storage + encrypted iCloud backup';
     } else {
       return 'Local storage';
@@ -907,7 +905,7 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
   }
 
   bool _canRunICloudBackfill() {
-    return Platform.isIOS && _useICloudStorage != false;
+    return Platform.isIOS && _useICloudStorage == true;
   }
 
   String _formatBackfillResult(ICloudBackfillResult result) {
@@ -1010,7 +1008,9 @@ class _StorageSettingsTileState extends State<_StorageSettingsTile> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Storage preference updated. Existing vault files will sync to iCloud automatically in the background.',
+              newPreference == true
+                  ? 'Storage preference updated. Existing vault files will sync to iCloud automatically in the background.'
+                  : 'Storage preference updated. Vault copies in iCloud are being removed; files stay on this device.',
             ),
             backgroundColor: AppTheme.accent,
             duration: const Duration(seconds: 4),
@@ -1118,17 +1118,8 @@ class _StorageSelectionDialog extends StatelessWidget {
               description:
                   'Faster read and write speeds for optimal performance. However, if your device is lost or damaged, your data cannot be recovered.',
               icon: Icons.phone_iphone,
-              isSelected: currentPreference == false,
+              isSelected: currentPreference != true,
               onTap: () => Navigator.of(context).pop('local'),
-            ),
-            const SizedBox(height: 16),
-            _StorageOption(
-              title: 'Auto-Detect',
-              description:
-                  'Use encrypted iCloud backup when available, otherwise keep local storage only. This is the default setting.',
-              icon: Icons.auto_awesome,
-              isSelected: currentPreference == null,
-              onTap: () => Navigator.of(context).pop('auto'),
             ),
             const SizedBox(height: 24),
             Container(

@@ -326,8 +326,60 @@ void main() {
       expect(orphanedPayloads, isEmpty);
     });
 
-    test('auto preference backs up only after the local video batch completes',
+    test('no preference set keeps vault files out of iCloud', () async {
+      await vault.setICloudBackupDirectoryForTesting(iCloudTmp);
+      final item = await vault.storeFile(
+          data: Uint8List.fromList('default local'.codeUnits),
+          filename: 'default.jpg');
+      await vault.waitForICloudSyncIdle();
+      expect(vault.pendingICloudBackupCount, 0);
+      expect(
+        await File('${iCloudTmp.path}/${item.vaultRelativePath}').exists(),
+        isFalse,
+      );
+    });
+
+    test('turning backup off removes copies of local items, keeps the rest',
         () async {
+      await vault.setStoragePreference(true);
+      await vault.setICloudBackupDirectoryForTesting(iCloudTmp);
+      final item = await vault.storeFile(
+          data: Uint8List.fromList('cloud then off'.codeUnits),
+          filename: 'off.jpg');
+      await vault.waitForICloudSyncIdle();
+      final cloud = File('${iCloudTmp.path}/${item.vaultRelativePath}');
+      expect(await cloud.exists(), isTrue);
+      // A copy of an item this device does not have is the only copy.
+      final orphan = File('${iCloudTmp.path}/not-on-this-device.bin');
+      await orphan.writeAsBytes(await cloud.readAsBytes());
+
+      await vault.setStoragePreference(false);
+      await vault.removeICloudCopiesOfLocalItemsIn(iCloudTmp);
+
+      expect(await cloud.exists(), isFalse);
+      expect(await orphan.exists(), isTrue);
+      expect(await _vaultFile(item).exists(), isTrue);
+    });
+
+    test('an evicted iCloud copy is not uploaded again', () async {
+      await vault.setStoragePreference(true);
+      final item = await vault.storeFile(
+          data: Uint8List.fromList('evicted'.codeUnits),
+          filename: 'evicted.jpg');
+      final rel = item.vaultRelativePath!;
+      final cloud = File('${iCloudTmp.path}/$rel');
+      final stub = File('${cloud.parent.path}/.${cloud.uri.pathSegments.last}.icloud');
+      await stub.parent.create(recursive: true);
+      await stub.writeAsString('stub');
+
+      await vault.setICloudBackupDirectoryForTesting(iCloudTmp);
+      await vault.waitForICloudSyncIdle();
+      expect(await cloud.exists(), isFalse);
+    });
+
+    test('opted-in backup runs only after the local video batch completes',
+        () async {
+      await vault.setStoragePreference(true);
       await vault.setICloudBackupDirectoryForTesting(iCloudTmp);
       final source = File('${rootTmp.path}/automatic-cloud.mp4');
       await source.writeAsBytes(
@@ -406,6 +458,7 @@ void main() {
 
       // Successful container initialization queues the complete current index,
       // recovering imports committed before the directory became available.
+      await vault.setStoragePreference(true);
       await vault.setICloudBackupDirectoryForTesting(iCloudTmp);
       await vault.waitForICloudSyncIdle();
       expect(

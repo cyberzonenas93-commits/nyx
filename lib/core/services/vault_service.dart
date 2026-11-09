@@ -679,8 +679,8 @@ class VaultService extends ChangeNotifier {
     _useICloudBackup = useICloud;
     _iCloudConfigurationGeneration++;
 
-    // Initialize iCloud backup directory if enabled or in auto mode.
-    if (useICloud != false && Platform.isIOS) {
+    // Initialize iCloud backup directory only when the user opted in.
+    if (useICloud == true && Platform.isIOS) {
       unawaited(_initializeICloudBackup());
     } else {
       _iCloudSyncQueue.clear();
@@ -688,6 +688,9 @@ class VaultService extends ChangeNotifier {
       _iCloudSyncRetryTimer?.cancel();
       _iCloudSyncRetryTimer = null;
       _iCloudBackupDirectory = null;
+      if (Platform.isIOS && _isInitialized) {
+        unawaited(_removeICloudCopiesOfLocalItems());
+      }
     }
 
     notifyListeners();
@@ -767,7 +770,7 @@ class VaultService extends ChangeNotifier {
     }
 
     // Defer iCloud backup init to background so vault UI can show sooner
-    final doICloudBackup = _useICloudBackup != false && Platform.isIOS;
+    final doICloudBackup = _useICloudBackup == true && Platform.isIOS;
 
     // Determine vault directory name based on vault type and ID
     String vaultName;
@@ -819,6 +822,8 @@ class VaultService extends ChangeNotifier {
       unawaited(_initializeICloudBackup().catchError((e) {
         debugPrint('[VaultService] iCloud backup init error: $e');
       }));
+    } else if (Platform.isIOS) {
+      unawaited(_removeICloudCopiesOfLocalItems());
     }
   }
 
@@ -997,7 +1002,9 @@ class VaultService extends ChangeNotifier {
     _items[index] = item.copyWith(metadata: meta, isEncrypted: true);
   }
 
-  bool get _automaticICloudBackupRequested => _useICloudBackup != false;
+  // iCloud backup is opt-in: a private vault must not leave the phone unless
+  // the user chose it (null, the old "auto" default, now means local only).
+  bool get _automaticICloudBackupRequested => _useICloudBackup == true;
 
   bool get _canAttemptAutomaticICloudBackup {
     // A test-injected directory represents an available iCloud container on
@@ -1369,6 +1376,15 @@ class VaultService extends ChangeNotifier {
       await backupDir.create(recursive: true);
     }
 
+    // An evicted iCloud file is only a hidden stub, so exists() is false.
+    // Copying again would re-upload the whole video on every unlock.
+    // shortcut: assumes the evicted copy is current (payloads are written
+    // once per id); compare sizes via NSMetadataQuery if that ever changes.
+    if (!await backupFile.exists() &&
+        await _iCloudPlaceholderFor(backupFile).exists()) {
+      return false;
+    }
+
     bool backupIsPlaintext = false;
     if (await backupFile.exists()) {
       backupIsPlaintext = !await VaultCipher.looksEncrypted(backupFile);
@@ -1461,6 +1477,85 @@ class VaultService extends ChangeNotifier {
         .map((name) => File('${directory.path}/$name'))
         .where((file) => file.path != canonicalBackupFile.path)
         .toList(growable: false);
+  }
+
+  // iOS replaces an evicted iCloud file with a hidden ".<name>.icloud" stub.
+  File _iCloudPlaceholderFor(File file) =>
+      File('${file.parent.path}/.${file.uri.pathSegments.last}.icloud');
+
+  /// Backup is off: remove this vault's iCloud copies of every item whose
+  /// encrypted payload is on this device. Copies of items missing here are
+  /// kept, because they are the only copy.
+  Future<int> _removeICloudCopiesOfLocalItems() async {
+    if (!Platform.isIOS || _automaticICloudBackupRequested) return 0;
+    final generation = _iCloudConfigurationGeneration;
+    final vaultId = _currentVaultId;
+    String? containerPath;
+    try {
+      containerPath = await const MethodChannel('com.angelonartey.nyx/icloud')
+          .invokeMethod<String>('getICloudContainerPath');
+    } catch (e) {
+      debugPrint('[VaultService] iCloud container lookup failed: $e');
+      return 0;
+    }
+    if (containerPath == null || containerPath.isEmpty) return 0;
+    if (generation != _iCloudConfigurationGeneration ||
+        vaultId != _currentVaultId) {
+      return 0;
+    }
+    final name = vaultId != null ? 'vault_${vaultId}_backup' : 'vault_backup';
+    return removeICloudCopiesOfLocalItemsIn(Directory('$containerPath/$name'),
+        configurationGeneration: generation);
+  }
+
+  @visibleForTesting
+  Future<int> removeICloudCopiesOfLocalItemsIn(Directory backupDirectory,
+      {int? configurationGeneration}) async {
+    final activeSync = _activeICloudSync;
+    if (activeSync != null) await activeSync;
+    if (!await backupDirectory.exists()) return 0;
+    var removed = 0;
+    for (final item in List<VaultItem>.of(_items)) {
+      if (_automaticICloudBackupRequested ||
+          (configurationGeneration != null &&
+              configurationGeneration != _iCloudConfigurationGeneration)) {
+        break;
+      }
+      final localPath = _resolveVaultFilePathForItem(item);
+      if (localPath == null) continue;
+      final localFile = File(localPath);
+      if (!await localFile.exists() ||
+          !await VaultCipher.looksEncrypted(localFile)) {
+        continue;
+      }
+      final canonical = _iCloudBackupFileForItem(item, localFile,
+          backupDirectory: backupDirectory);
+      final copies = <File>[
+        canonical,
+        ..._legacyICloudBackupFilesForItem(item, localFile, canonical,
+            backupDirectory: backupDirectory),
+      ];
+      for (final copy in copies) {
+        for (final file in <File>[copy, _iCloudPlaceholderFor(copy)]) {
+          try {
+            if (await file.exists()) {
+              await file.delete();
+              removed++;
+            }
+          } catch (e) {
+            debugPrint('[VaultService] Could not remove iCloud copy '
+                '${file.path}: $e');
+          }
+        }
+      }
+    }
+    try {
+      if (await backupDirectory.list().isEmpty) await backupDirectory.delete();
+    } catch (_) {}
+    if (removed > 0) {
+      debugPrint('[VaultService] Removed $removed vault copies from iCloud');
+    }
+    return removed;
   }
 
   Future<int> _deleteLegacyICloudCopies(
@@ -1875,7 +1970,7 @@ class VaultService extends ChangeNotifier {
     if (!Platform.isIOS) {
       throw StateError('Encrypted iCloud backup is only available on iOS');
     }
-    if (_useICloudBackup == false) {
+    if (_useICloudBackup != true) {
       throw StateError('Encrypted iCloud backup is disabled');
     }
 
@@ -3537,6 +3632,7 @@ class VaultService extends ChangeNotifier {
       // from a one-off failure: try for a real frame again once per unlock.
       final retryFallback = hasPoster &&
           item.metadata?['posterFallback'] == true &&
+          item.metadata?['posterRetried'] != true &&
           const <String>{'mp4', 'mov', 'm4v', '3gp'}
               .contains((item.extension ?? '').toLowerCase());
       if (hasPoster && !retryFallback) continue;
@@ -3544,6 +3640,15 @@ class VaultService extends ChangeNotifier {
           forceRegenerate: existing != null);
       if (retryFallback) {
         _posterBackfillFailed.add(item.id);
+        // One retry per item ever: re-reading the same undecodable video on
+        // every unlock kept the phone busy (and hot) for nothing.
+        final i = _items.indexWhere((x) => x.id == item.id);
+        if (i >= 0) {
+          final meta = Map<String, dynamic>.from(_items[i].metadata ?? const {});
+          meta['posterRetried'] = true;
+          _items[i] = _items[i].copyWith(metadata: meta);
+          _scheduleIndexSave();
+        }
         continue;
       }
       if (path != null) {
