@@ -28,7 +28,7 @@
   - `native_crypto_stream_test` is the format-drift gate: native and Dart must stay interchangeable both ways, and tampering must fail.
 - Run Flutter on the Mac, not the PC. The PC's Flutter 3.38 downgrades `pubspec.lock` (characters, matcher, material_color_utilities); never commit that.
 
-## Release (Mac mini, `angelonartey@192.168.0.145`)
+## Release (Mac mini, `angelonartey@192.168.0.145`; DHCP, was .131 on 2026-11-09, so scan port 22 if it times out)
 - Tree: `git -c core.autocrlf=false archive HEAD | ssh mac 'tar -x -C ~/nyx-release'`, then `flutter pub get` and `pod install`.
 - Archive: `~/nyx-release/archive.command`, opened in Terminal (keychain). It runs xcodebuild with `-allowProvisioningUpdates` and ASC key `R7BYLGVT9L`, then writes every bundle's version to `~/nyx-release/archive-bundles.txt`. It does not upload. Upload: `export.command` (ExportOptions `destination upload`).
 - Store: `node asc-nyx-submit.cjs ./qwen_asc.cjs [--dry]`. It waits for the build, attaches it to the version, sets What's New, checks the age-rating `socialMedia` answer and submits. A refused submission is resubmitted, or cancelled and replaced. `asc-nyx-cancel.cjs` cancels one submission; the read-only checks are `asc-nyx-status.cjs` and `asc-nyx-verify.cjs`. Copies are in `F:/LocalAI/release-nyx`.

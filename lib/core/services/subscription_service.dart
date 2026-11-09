@@ -633,8 +633,18 @@ class SubscriptionService extends ChangeNotifier {
     return hasUnlimitedAccess;
   }
 
+  bool _disposed = false;
+
+  // Store calls (init, restore, purchase stream) finish asynchronously and can
+  // land after the service is disposed; notifying then throws.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _purchaseCompleter?.complete(PurchaseResult.failed);
     _restoreCompleter?.complete(RestorePurchasesResult.failed);
     _subscription?.cancel();
